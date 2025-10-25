@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "command": "npx",
+      "args": [
+        "shadcn@latest",
+        "mcp"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "search_items_in_registries",
+        "view_items_in_registries",
+        "get_add_command_for_items",
+        "get_item_examples_from_registries"
+      ]
+    },
+    "TestSprite": {
+      "command": "npx",
+      "args": [
+        "@testsprite/testsprite-mcp@latest"
+      ],
+      "env": {
+        "API_KEY": "sk-user-yHArWsGEaBGPgtBrNG71IyYDVLalLTykG1bTiSIXBEPsGn1y-BuWwGGlcXDpFrOXCNEHb6eff-Dwn-04lXmqRF_ThUfobm38lk8wZWYVnAiAA3QVQI2pSKza28z3qQJ6q0A"
+      },
+      "disabled": true
+    }
+  }
+}
