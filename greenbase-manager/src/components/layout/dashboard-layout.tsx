@@ -33,9 +33,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   }, [])
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
+    <div className="min-h-screen bg-background">
       <Navigation pendingCount={pendingCount} />
-      <main style={{ backgroundColor: '#ffffff' }}>
+      <main className="bg-background">
         {children}
       </main>
     </div>

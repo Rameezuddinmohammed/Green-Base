@@ -45,12 +45,20 @@ interface AIAssistantPanelProps {
 export function AIAssistantPanel({ isOpen, onClose, stats }: AIAssistantPanelProps) {
   const [insights, setInsights] = useState<AIInsight[]>([])
   const [loading, setLoading] = useState(true)
+  const [lastUpdated, setLastUpdated] = useState<string>("")
 
   useEffect(() => {
     if (isOpen) {
       generateInsights()
     }
   }, [isOpen, stats])
+
+  // Update timestamp only on client side to avoid hydration mismatch
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setLastUpdated(new Date().toLocaleTimeString())
+    }
+  }, [insights])
 
   const generateInsights = async () => {
     setLoading(true)
@@ -121,6 +129,11 @@ export function AIAssistantPanel({ isOpen, onClose, stats }: AIAssistantPanelPro
 
     setInsights(generatedInsights)
     setLoading(false)
+    
+    // Update timestamp after insights are generated
+    if (typeof window !== 'undefined') {
+      setLastUpdated(new Date().toLocaleTimeString())
+    }
   }
 
   const getInsightIcon = (type: string) => {
@@ -281,7 +294,9 @@ export function AIAssistantPanel({ isOpen, onClose, stats }: AIAssistantPanelPro
           {/* Footer */}
           <div className="p-6 border-t bg-muted/30">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Last updated: {new Date().toLocaleTimeString()}</span>
+              <span>
+                {lastUpdated ? `Last updated: ${lastUpdated}` : 'Loading...'}
+              </span>
               <Button variant="ghost" size="sm" onClick={generateInsights}>
                 <Sparkles className="h-3 w-3 mr-1" />
                 Refresh

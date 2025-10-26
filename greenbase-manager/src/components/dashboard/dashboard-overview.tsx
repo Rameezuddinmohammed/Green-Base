@@ -109,9 +109,9 @@ export function DashboardOverview() {
   }
 
   const getConfidenceBadge = (score: number) => {
-    if (score >= 0.8) return <span className="badge badge-green">High</span>
-    if (score >= 0.5) return <span className="badge badge-yellow">Medium</span>
-    return <span className="badge badge-red">Low</span>
+    if (score >= 0.8) return <Badge className="bg-green-100 text-green-800 border-green-200">High</Badge>
+    if (score >= 0.5) return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Medium</Badge>
+    return <Badge className="bg-red-100 text-red-800 border-red-200">Low</Badge>
   }
 
   if (loading) {
@@ -143,54 +143,60 @@ export function DashboardOverview() {
           </p>
         </div>
 
-        <div className="card hover-lift">
-          <div className="flex items-center justify-between mb-2">
-            <h3 style={{ fontSize: '0.875rem', fontWeight: '500' }}>Pending Approvals</h3>
-            <Clock style={{ width: '1rem', height: '1rem', color: '#6b7280' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ea580c', marginBottom: '0.25rem' }}>{stats.pendingApprovals}</div>
-          <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-            Awaiting review
-          </p>
-        </div>
+        <Card className="hover-lift">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pending Approvals</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{stats.pendingApprovals}</div>
+            <p className="text-xs text-muted-foreground">
+              Awaiting review
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="card hover-lift">
-          <div className="flex items-center justify-between mb-2">
-            <h3 style={{ fontSize: '0.875rem', fontWeight: '500' }}>Active Sources</h3>
-            <Settings style={{ width: '1rem', height: '1rem', color: '#6b7280' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a', marginBottom: '0.25rem' }}>{stats.activeSources}</div>
-          <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-            Connected & syncing
-          </p>
-        </div>
+        <Card className="hover-lift">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Sources</CardTitle>
+            <Settings className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{stats.activeSources}</div>
+            <p className="text-xs text-muted-foreground">
+              Connected & syncing
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="card hover-lift">
-          <div className="flex items-center justify-between mb-2">
-            <h3 style={{ fontSize: '0.875rem', fontWeight: '500' }}>Avg Confidence</h3>
-            <TrendingUp style={{ width: '1rem', height: '1rem', color: '#6b7280' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>{Math.round(stats.avgConfidenceScore * 100)}%</div>
-          <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-            AI confidence score
-          </p>
-        </div>
+        <Card className="hover-lift">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Avg Confidence</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{Math.round(stats.avgConfidenceScore * 100)}%</div>
+            <p className="text-xs text-muted-foreground">
+              AI confidence score
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Recent Activity & Quick Actions */}
       <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
         {/* Recent Activity */}
-        <div className="card">
-          <div style={{ marginBottom: '1rem' }}>
-            <h3 className="flex items-center" style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.5rem' }}>
-              <BarChart3 style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.5rem' }} />
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <BarChart3 className="h-5 w-5 mr-2" />
               Recent Activity
-            </h3>
-            <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
+            </CardTitle>
+            <CardDescription>
               Latest updates across your knowledge base
-            </p>
-          </div>
-          <div>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <div className="space-y-4">
               {stats.recentActivity.length > 0 ? (
                 stats.recentActivity.map((activity) => (
@@ -218,21 +224,21 @@ export function DashboardOverview() {
                 </div>
               )}
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* AI Insights Panel */}
-        <div className="card">
-          <div style={{ marginBottom: '1rem' }}>
-            <h3 className="flex items-center" style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.5rem' }}>
-              <Zap style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.5rem', color: '#22c55e' }} />
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Zap className="h-5 w-5 mr-2 text-primary-500" />
               AI Insights
-            </h3>
-            <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
+            </CardTitle>
+            <CardDescription>
               Smart recommendations for your knowledge base
-            </p>
-          </div>
-          <div>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <div className="space-y-4">
               {stats.pendingApprovals > 0 && (
                 <div className="flex items-start space-x-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
@@ -290,8 +296,8 @@ export function DashboardOverview() {
                 </div>
               )}
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

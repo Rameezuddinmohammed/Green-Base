@@ -109,6 +109,44 @@ export function ApprovalQueueEnhanced() {
     loadDrafts()
   }, [])
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return // Don't trigger shortcuts when typing in inputs
+      }
+
+      const focusedDraft = drafts.find(d => d.id === selectedDrafts[0])
+      
+      switch (e.key.toLowerCase()) {
+        case 'a':
+          e.preventDefault()
+          if (selectedDrafts.length > 0) {
+            handleBatchApprove()
+          } else if (focusedDraft) {
+            handleApprove(focusedDraft.id)
+          }
+          break
+        case 'r':
+          e.preventDefault()
+          if (focusedDraft) {
+            handleReject(focusedDraft.id)
+          }
+          break
+        case 'e':
+          e.preventDefault()
+          if (focusedDraft) {
+            setEditingDraft(focusedDraft)
+            setEditedContent(focusedDraft.content)
+          }
+          break
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyPress)
+    return () => document.removeEventListener('keydown', handleKeyPress)
+  }, [selectedDrafts, drafts])
+
   const loadDrafts = async () => {
     try {
       const response = await fetch('/api/drafts')
@@ -234,7 +272,14 @@ export function ApprovalQueueEnhanced() {
                 <FileText className="h-5 w-5 mr-2" />
                 Approval Queue
               </CardTitle>
-              <CardDescription>AI-processed documents awaiting review</CardDescription>
+              <CardDescription>
+                AI-processed documents awaiting review
+                <span className="ml-4 text-xs text-muted-foreground">
+                  Shortcuts: <kbd className="px-1 py-0.5 bg-muted rounded text-xs">A</kbd> approve 
+                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">R</kbd> reject 
+                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">E</kbd> edit
+                </span>
+              </CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -334,8 +379,12 @@ export function ApprovalQueueEnhanced() {
                         className="mt-1"
                       />
 
-                      {/* Confidence Ring */}
-                      <div className="flex-shrink-0">
+                      {/* Confidence Ring with Visual Icons */}
+                      <div className="flex-shrink-0 flex items-center space-x-2">
+                        <div className="text-lg">
+                          {draft.confidence_score >= 0.8 ? '🟢' : 
+                           draft.confidence_score >= 0.5 ? '🟡' : '🔴'}
+                        </div>
                         <ConfidenceRing score={draft.confidence_score} />
                       </div>
 
@@ -351,7 +400,7 @@ export function ApprovalQueueEnhanced() {
                             <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-3">
                               <div className="flex items-center">
                                 <Calendar className="h-4 w-4 mr-1" />
-                                {new Date(draft.created_at).toLocaleString()}
+                                {typeof window !== 'undefined' ? new Date(draft.created_at).toLocaleString() : 'Loading...'}
                               </div>
                               {draft.author && (
                                 <div className="flex items-center">
@@ -422,10 +471,11 @@ export function ApprovalQueueEnhanced() {
                           <Button
                             size="sm"
                             onClick={() => handleApprove(draft.id)}
-                            className="bg-green-600 hover:bg-green-700"
+                            className="bg-green-600 hover:bg-green-700 relative"
                           >
                             <CheckCircle className="h-4 w-4 mr-1" />
                             Approve
+                            <kbd className="ml-2 px-1 py-0.5 text-xs bg-green-700 rounded">A</kbd>
                           </Button>
                           
                           <Button
@@ -449,6 +499,7 @@ export function ApprovalQueueEnhanced() {
                           >
                             <Edit className="h-4 w-4 mr-1" />
                             Edit
+                            <kbd className="ml-2 px-1 py-0.5 text-xs bg-muted rounded">E</kbd>
                           </Button>
                           
                           <Button
@@ -459,6 +510,7 @@ export function ApprovalQueueEnhanced() {
                           >
                             <XCircle className="h-4 w-4 mr-1" />
                             Reject
+                            <kbd className="ml-2 px-1 py-0.5 text-xs bg-muted rounded">R</kbd>
                           </Button>
                         </div>
 

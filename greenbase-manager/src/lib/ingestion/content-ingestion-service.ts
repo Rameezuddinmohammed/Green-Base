@@ -316,8 +316,7 @@ class ContentIngestionService {
   private async storeProcessedDocument(document: ProcessedContent, organizationId: string): Promise<void> {
     try {
       // Store in draft_documents table for approval queue
-      const supabase = await this.getSupabase()
-      const { error } = await supabase
+      const { error } = await this.supabase
         .from('draft_documents')
         .insert({
           id: document.id,

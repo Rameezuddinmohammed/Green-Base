@@ -1,9 +1,9 @@
 "use client"
 
-import * as React from "react"
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
+
 import { 
   BarChart3, 
   FileText, 
@@ -14,24 +14,9 @@ import {
   Bell,
   Command,
   Moon,
-  Sun,
-  Zap,
-  RefreshCw,
-  Plus,
-  Archive
+  Sun
 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { 
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandShortcut,
-} from "@/components/ui/command"
 
 interface NavigationProps {
   pendingCount?: number
@@ -39,20 +24,23 @@ interface NavigationProps {
 
 export function Navigation({ pendingCount = 0 }: NavigationProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const [isDark, setIsDark] = useState(false)
-  const [open, setOpen] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
 
   // Command palette shortcut
   useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
-        setOpen((open) => !open)
+        setShowCommandPalette(true)
+      }
+      if (e.key === 'Escape') {
+        setShowCommandPalette(false)
       }
     }
-    document.addEventListener("keydown", down)
-    return () => document.removeEventListener("keydown", down)
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   const navigation = [
@@ -60,177 +48,167 @@ export function Navigation({ pendingCount = 0 }: NavigationProps) {
       name: "Dashboard",
       href: "/dashboard",
       icon: BarChart3,
-      current: pathname === "/dashboard",
-      description: "Overview and insights"
+      current: pathname === "/dashboard"
     },
     {
       name: "Approval Queue",
-      href: "/dashboard",
+      href: "/dashboard/approvals",
       icon: FileText,
-      current: pathname.includes("approvals"),
-      badge: pendingCount > 0 ? pendingCount : undefined,
-      description: "Review pending documents"
+      current: pathname.startsWith("/dashboard/approvals"),
+      badge: pendingCount > 0 ? pendingCount : undefined
     },
     {
       name: "Knowledge Base",
-      href: "/dashboard",
+      href: "/dashboard/knowledge-base",
       icon: BookOpen,
-      current: pathname.includes("knowledge-base"),
-      description: "Browse approved content"
+      current: pathname.startsWith("/dashboard/knowledge-base")
     },
     {
       name: "Sources",
-      href: "/dashboard",
+      href: "/dashboard/sources",
       icon: Settings,
-      current: pathname.includes("sources"),
-      description: "Manage data connections"
+      current: pathname.startsWith("/dashboard/sources")
     }
   ]
 
-  const runCommand = React.useCallback((command: () => unknown) => {
-    setOpen(false)
-    command()
-  }, [])
-
   return (
     <>
-      {/* Main Navigation */}
-      <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center">
-          {/* Logo */}
-          <div className="mr-8">
-            <Link href="/dashboard" className="flex items-center space-x-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <span className="text-sm font-bold">🌱</span>
+      <nav className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 justify-between">
+            {/* Logo and main navigation */}
+            <div className="flex">
+              <div className="flex flex-shrink-0 items-center">
+                <Link href="/dashboard" className="logo">
+                  <div className="logo-icon">
+                    <span>🌱</span>
+                  </div>
+                  <span>GreenBase</span>
+                </Link>
               </div>
-              <span className="hidden font-bold sm:inline-block">GreenBase</span>
-            </Link>
-          </div>
+              <div className="hidden sm:ml-8 sm:flex sm:space-x-1">
+                {navigation.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={`nav-link ${item.current ? 'active' : ''}`}
+                    >
+                      <Icon style={{ width: '1rem', height: '1rem', marginRight: '0.5rem' }} />
+                      {item.name}
+                      {item.badge && (
+                        <span className="badge" style={{ marginLeft: '0.5rem', backgroundColor: '#22c55e', color: 'white' }}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
 
-          {/* Main Navigation */}
-          <nav className="flex items-center space-x-1">
+            {/* Search and user menu */}
+            <div className="flex items-center space-x-4">
+              {/* Global search */}
+              <div style={{ position: 'relative', display: 'none' }}>
+                <div style={{ position: 'absolute', top: '0', left: '0', bottom: '0', paddingLeft: '0.75rem', display: 'flex', alignItems: 'center', pointerEvents: 'none' }}>
+                  <Search style={{ width: '1rem', height: '1rem', color: '#6b7280' }} />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search knowledge base..."
+                  style={{ paddingLeft: '2.5rem', paddingRight: '1rem', width: '16rem', backgroundColor: '#f9fafb', border: '0', borderRadius: '0.375rem', padding: '0.5rem' }}
+                  onClick={() => setShowCommandPalette(true)}
+                  readOnly
+                />
+                <div style={{ position: 'absolute', top: '0', right: '0', bottom: '0', paddingRight: '0.75rem', display: 'flex', alignItems: 'center', pointerEvents: 'none' }}>
+                  <kbd style={{ display: 'inline-flex', alignItems: 'center', borderRadius: '0.25rem', border: '1px solid #e5e7eb', padding: '0.125rem 0.25rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                    <Command style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.125rem' }} />K
+                  </kbd>
+                </div>
+              </div>
+
+              {/* Theme toggle */}
+              <button
+                onClick={() => setIsDark(!isDark)}
+                style={{ width: '2.25rem', height: '2.25rem', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                {isDark ? (
+                  <Sun style={{ width: '1rem', height: '1rem' }} />
+                ) : (
+                  <Moon style={{ width: '1rem', height: '1rem' }} />
+                )}
+              </button>
+
+              {/* Notifications */}
+              <button style={{ width: '2.25rem', height: '2.25rem', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                <Bell style={{ width: '1rem', height: '1rem' }} />
+                {pendingCount > 0 && (
+                  <div style={{ position: 'absolute', top: '-0.25rem', right: '-0.25rem', width: '0.75rem', height: '0.75rem', backgroundColor: '#22c55e', borderRadius: '50%', animation: 'pulse-ring 1.5s ease-out infinite' }} />
+                )}
+              </button>
+
+              {/* User menu */}
+              <button style={{ width: '2.25rem', height: '2.25rem', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <User style={{ width: '1rem', height: '1rem' }} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile navigation */}
+        <div style={{ display: 'none', borderTop: '1px solid #e5e7eb' }}>
+          <div style={{ padding: '0.5rem', paddingTop: '0.5rem', paddingBottom: '0.75rem' }}>
             {navigation.map((item) => {
               const Icon = item.icon
               return (
-                <Link key={item.name} href={item.href}>
-                  <Button
-                    variant={item.current ? "secondary" : "ghost"}
-                    className="relative h-9 justify-start"
-                  >
-                    <Icon className="mr-2 h-4 w-4" />
-                    <span className="hidden sm:inline">{item.name}</span>
-                    {item.badge && (
-                      <Badge 
-                        variant="secondary" 
-                        className="ml-2 h-5 min-w-[20px] bg-orange-100 text-orange-800 hover:bg-orange-100"
-                      >
-                        {item.badge}
-                      </Badge>
-                    )}
-                  </Button>
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={`nav-link ${item.current ? 'active' : ''}`}
+                  style={{ display: 'flex', alignItems: 'center', padding: '0.75rem', fontSize: '1rem', fontWeight: '500', borderRadius: '0.375rem', marginBottom: '0.25rem' }}
+                >
+                  <Icon style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.75rem' }} />
+                  {item.name}
+                  {item.badge && (
+                    <span className="badge" style={{ marginLeft: 'auto', backgroundColor: '#22c55e', color: 'white' }}>
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               )
             })}
-          </nav>
-
-          <div className="ml-auto flex items-center space-x-2">
-            {/* Command Palette Trigger */}
-            <Button
-              variant="outline"
-              className="relative h-9 w-9 p-0 xl:h-10 xl:w-60 xl:justify-start xl:px-3 xl:py-2"
-              onClick={() => setOpen(true)}
-            >
-              <Search className="h-4 w-4 xl:mr-2" />
-              <span className="hidden xl:inline-flex">Search...</span>
-              <kbd className="pointer-events-none absolute right-1.5 top-2 hidden h-6 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 xl:flex">
-                <span className="text-xs">⌘</span>K
-              </kbd>
-            </Button>
-
-            {/* Theme Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsDark(!isDark)}
-            >
-              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
-
-            {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-4 w-4" />
-              {pendingCount > 0 && (
-                <Badge className="absolute -right-1 -top-1 h-5 w-5 rounded-full p-0 text-xs">
-                  {pendingCount > 9 ? "9+" : pendingCount}
-                </Badge>
-              )}
-            </Button>
-
-            {/* User Menu */}
-            <Button variant="ghost" size="icon">
-              <User className="h-4 w-4" />
-            </Button>
           </div>
         </div>
       </nav>
 
-      {/* Command Palette */}
-      <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput placeholder="Type a command or search..." />
-        <CommandList>
-          <CommandEmpty>No results found.</CommandEmpty>
-          
-          <CommandGroup heading="Navigation">
-            {navigation.map((item) => {
-              const Icon = item.icon
-              return (
-                <CommandItem
-                  key={item.name}
-                  onSelect={() => runCommand(() => router.push(item.href))}
-                >
-                  <Icon className="mr-2 h-4 w-4" />
-                  <span>{item.name}</span>
-                  <CommandShortcut>{item.description}</CommandShortcut>
-                </CommandItem>
-              )
-            })}
-          </CommandGroup>
-
-          <CommandGroup heading="Quick Actions">
-            <CommandItem onSelect={() => runCommand(() => router.push("/dashboard"))}>
-              <Zap className="mr-2 h-4 w-4" />
-              <span>View AI Insights</span>
-            </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => console.log("Sync all sources"))}>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              <span>Sync All Sources</span>
-            </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => console.log("Add new source"))}>
-              <Plus className="mr-2 h-4 w-4" />
-              <span>Add New Source</span>
-            </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => console.log("View archived"))}>
-              <Archive className="mr-2 h-4 w-4" />
-              <span>View Archived Documents</span>
-            </CommandItem>
-          </CommandGroup>
-
-          <CommandGroup heading="Smart Filters">
-            <CommandItem onSelect={() => runCommand(() => console.log("Recently updated"))}>
-              <span>🔥</span>
-              <span className="ml-2">Recently Updated</span>
-            </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => console.log("Needs review"))}>
-              <span>🕒</span>
-              <span className="ml-2">Needs Review</span>
-            </CommandItem>
-            <CommandItem onSelect={() => runCommand(() => console.log("High confidence"))}>
-              <span>🌿</span>
-              <span className="ml-2">High Confidence Only</span>
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
+      {/* Command Palette Overlay */}
+      {showCommandPalette && (
+        <div style={{ position: 'fixed', top: '0', left: '0', right: '0', bottom: '0', zIndex: '50', backgroundColor: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(4px)', animation: 'scale-in 0.2s ease-out' }}>
+          <div style={{ position: 'fixed', top: '25%', left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: '32rem' }}>
+            <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', borderRadius: '0.5rem', border: '1px solid #e5e7eb', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', padding: '1rem' }}>
+              <div className="flex items-center space-x-3 mb-4">
+                <Search style={{ width: '1.25rem', height: '1.25rem', color: '#6b7280' }} />
+                <input
+                  placeholder="Search or jump to..."
+                  style={{ border: '0', backgroundColor: 'transparent', fontSize: '1.125rem', outline: 'none', width: '100%' }}
+                  autoFocus
+                />
+              </div>
+              <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                <div style={{ marginBottom: '0.5rem', fontWeight: '500' }}>Quick Actions</div>
+                <div className="space-y-1">
+                  <div style={{ padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer' }} onMouseOver={(e) => e.target.style.backgroundColor = '#f3f4f6'} onMouseOut={(e) => e.target.style.backgroundColor = 'transparent'}>📝 Go to Approval Queue</div>
+                  <div style={{ padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer' }} onMouseOver={(e) => e.target.style.backgroundColor = '#f3f4f6'} onMouseOut={(e) => e.target.style.backgroundColor = 'transparent'}>📚 Search Knowledge Base</div>
+                  <div style={{ padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer' }} onMouseOver={(e) => e.target.style.backgroundColor = '#f3f4f6'} onMouseOut={(e) => e.target.style.backgroundColor = 'transparent'}>⚙️ Manage Sources</div>
+                  <div style={{ padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer' }} onMouseOver={(e) => e.target.style.backgroundColor = '#f3f4f6'} onMouseOut={(e) => e.target.style.backgroundColor = 'transparent'}>🔄 Sync All Sources</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

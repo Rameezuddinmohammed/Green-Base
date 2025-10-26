@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, Settings, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, Loader2 } from "lucide-react"
+import { Plus, Settings, Trash2, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react"
 
 interface ConnectedSource {
   id: string
@@ -60,7 +60,6 @@ export function SourceManagement() {
   const [driveItems, setDriveItems] = useState<DriveItem[]>([])
   const [selectedChannels, setSelectedChannels] = useState<string[]>([])
   const [selectedFolders, setSelectedFolders] = useState<string[]>([])
-  const [syncingSource, setSyncingSource] = useState<string | null>(null)
 
   useEffect(() => {
     loadSources()
@@ -165,7 +164,6 @@ export function SourceManagement() {
 
   const handleSyncNow = async (sourceId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    setSyncingSource(sourceId)
     try {
       const response = await fetch(`/api/sources/${sourceId}/ingest`, {
         method: 'POST'
@@ -176,8 +174,6 @@ export function SourceManagement() {
       }
     } catch (error) {
       console.error('Failed to sync source:', error)
-    } finally {
-      setSyncingSource(null)
     }
   }
 
@@ -253,37 +249,37 @@ export function SourceManagement() {
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <button 
-                className="btn btn-outline"
-                style={{ justifyContent: 'flex-start', height: 'auto', padding: '1rem', width: '100%' }}
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto p-4"
                 onClick={() => handleConnectSource('microsoft')}
               >
                 <div className="flex items-center space-x-3">
-                  <span style={{ fontSize: '1.5rem' }}>💬</span>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontWeight: '500' }}>Microsoft Teams</div>
-                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                  <span className="text-2xl"></span>
+                  <div className="text-left">
+                    <div className="font-medium">Microsoft Teams</div>
+                    <div className="text-sm text-muted-foreground">
                       Connect Teams channels for message ingestion
                     </div>
                   </div>
                 </div>
-              </button>
+              </Button>
               
-              <button 
-                className="btn btn-outline"
-                style={{ justifyContent: 'flex-start', height: 'auto', padding: '1rem', width: '100%' }}
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto p-4"
                 onClick={() => handleConnectSource('google')}
               >
                 <div className="flex items-center space-x-3">
-                  <span style={{ fontSize: '1.5rem' }}>📁</span>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontWeight: '500' }}>Google Drive</div>
-                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                  <span className="text-2xl"></span>
+                  <div className="text-left">
+                    <div className="font-medium">Google Drive</div>
+                    <div className="text-sm text-muted-foreground">
                       Connect Drive folders for document ingestion
                     </div>
                   </div>
                 </div>
-              </button>
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -304,102 +300,102 @@ export function SourceManagement() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sources.map((source) => {
             const error = getSourceError(source)
             return (
-              <div key={source.id} className="card hover-lift" style={{ position: 'relative' }}>
-                <div className="card-header">
+              <Card key={source.id} className="hover-lift group relative">
+                <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
-                      <span style={{ fontSize: '1.125rem' }}>{getSourceIcon(source.type)}</span>
-                      <h3 className="card-title" style={{ fontSize: '1rem' }}>{source.name}</h3>
+                      <span className="text-lg">{getSourceIcon(source.type)}</span>
+                      <CardTitle className="text-base">{source.name}</CardTitle>
                     </div>
                     <div className="flex items-center space-x-2">
                       {getSourceStatusBadge(source)}
                       {error && (
-                        <div style={{ position: 'relative' }}>
-                          <AlertTriangle style={{ width: '1rem', height: '1rem', color: '#ef4444' }} />
-                          <div style={{ position: 'absolute', bottom: '100%', right: '0', marginBottom: '0.5rem', width: '16rem', padding: '0.5rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '0.375rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', fontSize: '0.75rem', color: '#991b1b', opacity: '0', transition: 'opacity 0.2s', zIndex: '10' }}>
+                        <div className="relative">
+                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                          <div className="absolute bottom-full right-0 mb-2 w-64 p-2 bg-red-50 border border-red-200 rounded-md shadow-lg text-xs text-red-800 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                             {error}
                           </div>
                         </div>
                       )}
                     </div>
                   </div>
-                  <div className="card-description">
+                  <CardDescription>
                     <div className="flex items-center justify-between">
                       <span>{source.type === 'teams' ? 'Microsoft Teams' : 'Google Drive'}</span>
                       {source.lastSyncAt && (
-                        <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                        <span className="text-xs text-muted-foreground">
                           Last sync: {new Date(source.lastSyncAt).toLocaleString()}
                         </span>
                       )}
                     </div>
                     {source.selectedChannels?.length && (
-                      <span style={{ display: 'block', fontSize: '0.75rem', marginTop: '0.25rem', color: '#16a34a' }}>
+                      <span className="block text-xs mt-1 text-primary-600">
                         📺 {source.selectedChannels.length} channels selected
                       </span>
                     )}
                     {source.selectedFolders?.length && (
-                      <span style={{ display: 'block', fontSize: '0.75rem', marginTop: '0.25rem', color: '#16a34a' }}>
+                      <span className="block text-xs mt-1 text-primary-600">
                         📁 {source.selectedFolders.length} folders selected
                       </span>
                     )}
-                  </div>
-                </div>
-                <div className="card-content">
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
                   <div className="flex space-x-2">
-                    <button 
-                      className="btn btn-outline btn-sm"
+                    <Button 
+                      variant="outline" 
+                      size="sm"
                       onClick={() => handleConfigureSource(source)}
-                      style={{ flex: '1' }}
+                      className="flex-1"
                     >
-                      <Settings style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.25rem' }} />
+                      <Settings className="w-3 h-3 mr-1" />
                       Configure
-                    </button>
+                    </Button>
                     
-                    {/* Sync Now button - visible on hover */}
-                    <button
-                      className="btn btn-outline btn-sm hover-scale"
+                    {/* Sync Now button - appears on hover */}
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={(e) => handleSyncNow(source.id, e)}
-                      style={{ 
-                        opacity: source.isActive ? '1' : '0.5',
-                        transition: 'all 0.2s ease',
-                        backgroundColor: source.isActive ? '#f0fdf4' : 'transparent',
-                        borderColor: source.isActive ? '#22c55e' : '#d1d5db',
-                        color: source.isActive ? '#16a34a' : '#6b7280'
-                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
                       title="Sync now"
-                      disabled={!source.isActive || syncingSource === source.id}
                     >
-                      <RefreshCw 
-                        style={{ 
-                          width: '0.75rem', 
-                          height: '0.75rem',
-                          animation: syncingSource === source.id ? 'spin 1s linear infinite' : 'none'
-                        }} 
-                      />
-                      <span style={{ marginLeft: '0.25rem', fontSize: '0.75rem' }}>
-                        {syncingSource === source.id ? 'Syncing...' : 'Sync'}
-                      </span>
-                    </button>
+                      <RefreshCw className="w-3 h-3" />
+                    </Button>
                     
-                    <button 
-                      className="btn btn-outline btn-sm" 
-                      style={{ color: '#dc2626' }}
-                      onClick={() => {
-                        if (confirm(`Are you sure you want to disconnect "${source.name}"?`)) {
-                          handleDisconnectSource(source.id)
-                        }
-                      }}
-                    >
-                      <Trash2 style={{ width: '0.75rem', height: '0.75rem', marginRight: '0.25rem' }} />
-                      Disconnect
-                    </button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700">
+                          <Trash2 className="w-3 h-3 mr-1" />
+                          Disconnect
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Disconnect Source</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to disconnect "{source.name}"? 
+                            This will revoke access and archive related documents.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction 
+                            onClick={() => handleDisconnectSource(source.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Disconnect
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             )
           })}
         </div>
