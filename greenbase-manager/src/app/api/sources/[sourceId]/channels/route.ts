@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOAuthService } from '../../../../../lib/oauth/oauth-service'
-import { getServerSession } from 'next-auth'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ sourceId: string }> }
 ) {
   try {
-    const session = await getServerSession()
+    const supabase = createRouteHandlerClient({ cookies })
+    const { data: { session } } = await supabase.auth.getSession()
     
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { sourceId } = await params
+
     const oauthService = getOAuthService()
-    // Use email as user identifier for now
-    const channels = await oauthService.getTeamsChannels(session.user.email, sourceId)
+    const channels = await oauthService.getTeamsChannels(session.user.id, sourceId)
 
     return NextResponse.json({ channels })
   } catch (error: any) {

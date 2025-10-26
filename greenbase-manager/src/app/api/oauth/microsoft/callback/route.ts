@@ -1,42 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOAuthService } from '../../../../../lib/oauth/oauth-service'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = createRouteHandlerClient({ cookies })
+    const { data: { session } } = await supabase.auth.getSession()
+    
+    if (!session?.user?.email) {
+      return NextResponse.redirect(new URL('/auth/signin', request.url))
+    }
+
     const { searchParams } = new URL(request.url)
     const code = searchParams.get('code')
-    const state = searchParams.get('state') // This contains the userId
+    const state = searchParams.get('state')
     const error = searchParams.get('error')
 
     if (error) {
       console.error('Microsoft OAuth error:', error)
-      return NextResponse.redirect(
-        new URL(`/dashboard/sources?error=${encodeURIComponent(error)}`, request.url)
-      )
+      return NextResponse.redirect(new URL('/dashboard?error=oauth_failed', request.url))
     }
 
-    if (!code || !state) {
-      return NextResponse.redirect(
-        new URL('/dashboard/sources?error=missing_parameters', request.url)
-      )
+    if (!code) {
+      return NextResponse.redirect(new URL('/dashboard?error=no_code', request.url))
+    }
+
+    // Verify state matches user ID for security
+    if (state !== session.user.id) {
+      return NextResponse.redirect(new URL('/dashboard?error=invalid_state', request.url))
     }
 
     const oauthService = getOAuthService()
-    const connectedSource = await oauthService.handleCallback(
+    const source = await oauthService.handleCallback(
       'microsoft',
       code,
-      state, // userId from state parameter
-      'Microsoft Teams' // Default name, can be customized later
+      session.user.id, // Use UUID instead of email
+      'Microsoft Teams Connection'
     )
 
-    // Redirect to success page with source ID
-    return NextResponse.redirect(
-      new URL(`/dashboard/sources?success=microsoft&sourceId=${connectedSource.id}`, request.url)
-    )
+    return NextResponse.redirect(new URL('/dashboard?connected=microsoft', request.url))
   } catch (error: any) {
     console.error('Microsoft OAuth callback error:', error)
-    return NextResponse.redirect(
-      new URL(`/dashboard/sources?error=${encodeURIComponent(error.message)}`, request.url)
-    )
+    return NextResponse.redirect(new URL('/dashboard?error=callback_failed', request.url))
   }
 }
+

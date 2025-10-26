@@ -61,10 +61,18 @@ class AzureKeyVaultService {
     }
   }
 
+  // Helper method to sanitize userId for Key Vault secret names
+  private sanitizeSecretName(name: string): string {
+    // Azure Key Vault secret names can only contain alphanumeric characters and hyphens
+    // Replace @ and other invalid characters with hyphens
+    return name.replace(/[^a-zA-Z0-9-]/g, '-')
+  }
+
   // Helper methods for OAuth tokens
   async storeOAuthTokens(userId: string, provider: string, accessToken: string, refreshToken: string): Promise<void> {
-    const accessTokenKey = `oauth-${provider}-access-${userId}`
-    const refreshTokenKey = `oauth-${provider}-refresh-${userId}`
+    const sanitizedUserId = this.sanitizeSecretName(userId)
+    const accessTokenKey = `oauth-${provider}-access-${sanitizedUserId}`
+    const refreshTokenKey = `oauth-${provider}-refresh-${sanitizedUserId}`
     
     await Promise.all([
       this.setSecret(accessTokenKey, accessToken),
@@ -73,8 +81,9 @@ class AzureKeyVaultService {
   }
 
   async getOAuthTokens(userId: string, provider: string): Promise<{ accessToken?: string; refreshToken?: string }> {
-    const accessTokenKey = `oauth-${provider}-access-${userId}`
-    const refreshTokenKey = `oauth-${provider}-refresh-${userId}`
+    const sanitizedUserId = this.sanitizeSecretName(userId)
+    const accessTokenKey = `oauth-${provider}-access-${sanitizedUserId}`
+    const refreshTokenKey = `oauth-${provider}-refresh-${sanitizedUserId}`
     
     const [accessToken, refreshToken] = await Promise.all([
       this.getSecret(accessTokenKey),
@@ -85,8 +94,9 @@ class AzureKeyVaultService {
   }
 
   async deleteOAuthTokens(userId: string, provider: string): Promise<void> {
-    const accessTokenKey = `oauth-${provider}-access-${userId}`
-    const refreshTokenKey = `oauth-${provider}-refresh-${userId}`
+    const sanitizedUserId = this.sanitizeSecretName(userId)
+    const accessTokenKey = `oauth-${provider}-access-${sanitizedUserId}`
+    const refreshTokenKey = `oauth-${provider}-refresh-${sanitizedUserId}`
     
     await Promise.all([
       this.deleteSecret(accessTokenKey),

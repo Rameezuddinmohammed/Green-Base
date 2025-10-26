@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOAuthService } from '../../../lib/oauth/oauth-service'
-import { getServerSession } from 'next-auth'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
   try {
-    // For testing purposes, use a dummy user ID
-    const testUserId = 'test-user-123'
+    const supabase = createRouteHandlerClient({ cookies })
+    const { data: { session } } = await supabase.auth.getSession()
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     const oauthService = getOAuthService()
-    const sources = await oauthService.getConnectedSources(testUserId)
+    const sources = await oauthService.getConnectedSources(session.user.id)
 
     return NextResponse.json({ sources })
   } catch (error: any) {
@@ -22,7 +27,8 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const session = await getServerSession()
+    const supabase = createRouteHandlerClient({ cookies })
+    const { data: { session } } = await supabase.auth.getSession()
     
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -36,7 +42,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const oauthService = getOAuthService()
-    await oauthService.disconnectSource(session.user.email, sourceId)
+    await oauthService.disconnectSource(session.user.id, sourceId)
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
@@ -47,3 +53,4 @@ export async function DELETE(request: NextRequest) {
     )
   }
 }
+

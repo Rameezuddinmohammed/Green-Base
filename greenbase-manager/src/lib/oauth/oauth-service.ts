@@ -228,6 +228,23 @@ export class OAuthService {
   }
 
   /**
+   * Update last sync timestamp for a source
+   */
+  async updateLastSync(userId: string, sourceId: string): Promise<void> {
+    await this.initialize()
+
+    const { error } = await this.supabase
+      .from('connected_sources')
+      .update({ last_sync_at: new Date().toISOString() })
+      .eq('id', sourceId)
+      .eq('user_id', userId)
+
+    if (error) {
+      throw new OAuthError(`Failed to update last sync: ${error.message}`, 'DATABASE_ERROR')
+    }
+  }
+
+  /**
    * Disconnect and revoke a source
    */
   async disconnectSource(userId: string, sourceId: string): Promise<void> {

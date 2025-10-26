@@ -78,7 +78,7 @@ export async function requireManager() {
 /**
  * Get Supabase client with user context for server components
  */
-export function getServerSupabase() {
+export async function getServerSupabase() {
   return createServerComponentClient<Database>({ cookies })
 }
 

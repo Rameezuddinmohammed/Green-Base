@@ -10,6 +10,8 @@ export async function middleware(req: NextRequest) {
   // Refresh session if expired - required for Server Components
   const { data: { session } } = await supabase.auth.getSession()
 
+
+
   // Define protected routes
   const protectedRoutes = ['/dashboard', '/approval-queue', '/sources', '/analytics']
   const managerOnlyRoutes = ['/approval-queue', '/sources', '/analytics', '/users']

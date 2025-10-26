@@ -78,6 +78,11 @@ class ContentIngestionService {
     // Store job in database
     await this.storeIngestionJob(job)
 
+    // Update last sync timestamp immediately
+    const { getOAuthService } = await import('../oauth/oauth-service')
+    const oauthService = getOAuthService()
+    await oauthService.updateLastSync(source.userId, source.id)
+
     // Start ingestion process asynchronously
     this.processIngestion(source, job, options).catch(error => {
       console.error(`Ingestion job ${job.id} failed:`, error)
@@ -311,7 +316,8 @@ class ContentIngestionService {
   private async storeProcessedDocument(document: ProcessedContent, organizationId: string): Promise<void> {
     try {
       // Store in draft_documents table for approval queue
-      const { error } = await this.supabase
+      const supabase = await this.getSupabase()
+      const { error } = await supabase
         .from('draft_documents')
         .insert({
           id: document.id,
