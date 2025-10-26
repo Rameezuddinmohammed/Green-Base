@@ -24,7 +24,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const session = await getServerSession()
     
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -36,7 +36,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const oauthService = getOAuthService()
-    await oauthService.disconnectSource(session.user.id, sourceId)
+    await oauthService.disconnectSource(session.user.email, sourceId)
 
     return NextResponse.json({ success: true })
   } catch (error: any) {

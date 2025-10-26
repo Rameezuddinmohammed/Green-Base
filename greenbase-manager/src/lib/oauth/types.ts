@@ -1,3 +1,5 @@
+export type OAuthProvider = 'microsoft' | 'google'
+
 export interface OAuthTokens {
   accessToken: string
   refreshToken: string
@@ -5,13 +7,18 @@ export interface OAuthTokens {
   scopes: string[]
 }
 
-export interface OAuthProvider {
+export interface ConnectedSource {
+  id: string
+  type: 'teams' | 'google_drive'
   name: string
-  clientId: string
-  clientSecret: string
-  scopes: string[]
-  authUrl: string
-  tokenUrl: string
+  userId: string
+  accessToken: string
+  refreshToken: string
+  selectedChannels?: string[]
+  selectedFolders?: string[]
+  selectedTeamChannels?: TeamChannelMapping[]
+  lastSyncAt?: Date
+  isActive: boolean
 }
 
 export interface TeamChannelMapping {
@@ -20,44 +27,27 @@ export interface TeamChannelMapping {
   displayName: string
 }
 
-export interface ConnectedSource {
-  id: string
-  type: 'teams' | 'google_drive'
-  name: string
-  userId: string
-  // SECURITY NOTE: accessToken and refreshToken are retrieved from Azure Key Vault
-  // They are included here for runtime use but never stored in database
-  accessToken: string
-  refreshToken: string
-  selectedChannels?: string[]
-  selectedFolders?: string[]
-  selectedTeamChannels?: TeamChannelMapping[] // For Microsoft Teams with teamId preservation
-  lastSyncAt?: Date
-  isActive: boolean
-}
-
 export interface TeamsChannel {
   id: string
-  teamId: string // CRITICAL: Store teamId for message retrieval
+  teamId: string
   displayName: string
   description?: string
-  webUrl: string
+  webUrl?: string
 }
 
 export interface TeamsMessage {
   id: string
   createdDateTime: string
+  body: {
+    content: string
+    contentType: string
+  }
   from: {
     user?: {
       displayName: string
       id: string
     }
   }
-  body: {
-    content: string
-    contentType: 'text' | 'html'
-  }
-  attachments?: any[]
 }
 
 export interface DriveItem {
@@ -76,15 +66,12 @@ export interface DriveItem {
 }
 
 export class OAuthError extends Error {
-  code: string
-  statusCode?: number
-  details?: any
-
-  constructor(message: string, code: string, statusCode?: number, details?: any) {
+  constructor(
+    message: string,
+    public code: string,
+    public originalError?: any
+  ) {
     super(message)
     this.name = 'OAuthError'
-    this.code = code
-    this.statusCode = statusCode
-    this.details = details
   }
 }

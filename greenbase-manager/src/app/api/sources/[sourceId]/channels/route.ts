@@ -4,17 +4,19 @@ import { getServerSession } from 'next-auth'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { sourceId: string } }
+  { params }: { params: Promise<{ sourceId: string }> }
 ) {
   try {
     const session = await getServerSession()
     
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { sourceId } = await params
     const oauthService = getOAuthService()
-    const channels = await oauthService.getTeamsChannels(session.user.id, params.sourceId)
+    // Use email as user identifier for now
+    const channels = await oauthService.getTeamsChannels(session.user.email, sourceId)
 
     return NextResponse.json({ channels })
   } catch (error: any) {

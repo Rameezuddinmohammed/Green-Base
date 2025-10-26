@@ -4,22 +4,23 @@ import { getServerSession } from 'next-auth'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { sourceId: string } }
+  { params }: { params: Promise<{ sourceId: string }> }
 ) {
   try {
     const session = await getServerSession()
     
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
     const folderId = searchParams.get('folderId')
+    const { sourceId } = await params
 
     const oauthService = getOAuthService()
     const folders = await oauthService.getDriveFolders(
-      session.user.id, 
-      params.sourceId, 
+      session.user.email, 
+      sourceId, 
       folderId || undefined
     )
 

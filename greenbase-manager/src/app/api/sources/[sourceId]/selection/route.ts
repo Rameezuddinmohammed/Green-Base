@@ -4,22 +4,23 @@ import { getServerSession } from 'next-auth'
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { sourceId: string } }
+  { params }: { params: Promise<{ sourceId: string }> }
 ) {
   try {
     const session = await getServerSession()
     
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const body = await request.json()
     const { selectedChannels, selectedFolders } = body
+    const { sourceId } = await params
 
     const oauthService = getOAuthService()
     await oauthService.updateSourceSelection(
-      session.user.id,
-      params.sourceId,
+      session.user.email,
+      sourceId,
       selectedChannels,
       selectedFolders
     )

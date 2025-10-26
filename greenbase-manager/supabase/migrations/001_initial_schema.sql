@@ -32,10 +32,10 @@ CREATE TABLE connected_sources (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type source_type NOT NULL,
     name TEXT NOT NULL,
-    access_token TEXT NOT NULL, -- Encrypted in application layer
-    refresh_token TEXT NOT NULL, -- Encrypted in application layer
-    selected_channels TEXT[], -- For Teams integration
+    -- SECURITY: Tokens are stored in Azure Key Vault, not in database
+    selected_channels TEXT[], -- For Teams integration (deprecated)
     selected_folders TEXT[], -- For Google Drive integration
+    selected_team_channels JSONB DEFAULT '[]', -- Team-channel mappings for Teams
     last_sync_at TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -47,9 +47,15 @@ CREATE TABLE draft_documents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,
     content TEXT NOT NULL,
+    summary TEXT,
+    topics TEXT[] DEFAULT '{}',
     confidence_score DECIMAL(3,2) NOT NULL CHECK (confidence_score >= 0 AND confidence_score <= 1),
+    confidence_reasoning TEXT,
     triage_level triage_level NOT NULL,
     status document_status DEFAULT 'pending',
+    source_references JSONB DEFAULT '[]',
+    pii_entities_found INTEGER DEFAULT 0,
+    processing_metadata JSONB DEFAULT '{}',
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

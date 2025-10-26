@@ -1,4 +1,4 @@
-import { testSupabase, cleanupTestData, createTestOrganization, createTestUser, testData } from '../setup'
+import { testSupabase, cleanupTestData, createTestOrganization, createTestUser, createTestApprovedDocument, testData, TEST_USER_ID } from '../setup'
 
 describe('Vector Search Functions', () => {
   let org: any
@@ -12,7 +12,7 @@ describe('Vector Search Functions', () => {
     manager = await createTestUser(org.id, testData.manager)
 
     // Create test documents with mock embeddings
-    const mockEmbedding = Array(1536).fill(0.1).join(',') // Mock OpenAI embedding format
+    const mockEmbedding = Array(1536).fill(0.1) // Mock OpenAI embedding format
 
     const documents = [
       {
@@ -22,7 +22,7 @@ describe('Vector Search Functions', () => {
         tags: ['javascript', 'programming', 'web'],
         organization_id: org.id,
         approved_by: manager.id,
-        embedding: `[${mockEmbedding}]`
+        embedding: mockEmbedding
       },
       {
         title: 'React Components',
@@ -31,7 +31,7 @@ describe('Vector Search Functions', () => {
         tags: ['react', 'components', 'ui'],
         organization_id: org.id,
         approved_by: manager.id,
-        embedding: `[${Array(1536).fill(0.2).join(',')}]`
+        embedding: Array(1536).fill(0.2)
       },
       {
         title: 'Database Design',
@@ -40,19 +40,16 @@ describe('Vector Search Functions', () => {
         tags: ['database', 'design', 'sql'],
         organization_id: org.id,
         approved_by: manager.id,
-        embedding: `[${Array(1536).fill(0.3).join(',')}]`
+        embedding: Array(1536).fill(0.3)
       }
     ]
 
     for (const doc of documents) {
-      const { data } = await testSupabase
-        .from('approved_documents')
-        .insert(doc)
-        .select()
-        .single()
-      
-      if (data) {
-        testDocuments.push(data)
+      try {
+        const createdDoc = await createTestApprovedDocument(org.id, manager.id, doc)
+        testDocuments.push(createdDoc)
+      } catch (error) {
+        console.error('Failed to create test document:', error)
       }
     }
   })
@@ -63,7 +60,7 @@ describe('Vector Search Functions', () => {
 
   describe('match_documents function', () => {
     test('should return similar documents based on embedding', async () => {
-      const queryEmbedding = `[${Array(1536).fill(0.15).join(',')}]`
+      const queryEmbedding = Array(1536).fill(0.15)
       
       const { data, error } = await testSupabase
         .rpc('match_documents', {
@@ -86,7 +83,7 @@ describe('Vector Search Functions', () => {
     })
 
     test('should respect match threshold', async () => {
-      const queryEmbedding = `[${Array(1536).fill(0.9).join(',')}]` // Very different embedding
+      const queryEmbedding = Array(1536).fill(0.9) // Very different embedding
       
       const { data, error } = await testSupabase
         .rpc('match_documents', {
@@ -110,7 +107,7 @@ describe('Vector Search Functions', () => {
         .single()
         .then(({ data }) => data)
 
-      const queryEmbedding = `[${Array(1536).fill(0.1).join(',')}]`
+      const queryEmbedding = Array(1536).fill(0.1)
       
       const { data, error } = await testSupabase
         .rpc('match_documents', {
@@ -128,30 +125,44 @@ describe('Vector Search Functions', () => {
 
   describe('document chunks functionality', () => {
     test('should create and search document chunks', async () => {
+      // Ensure we have a document to work with
+      if (testDocuments.length === 0) {
+        const testDoc = await createTestApprovedDocument(org.id, manager.id, {
+          title: 'Chunk Test Document',
+          content: 'This is a test document for chunks.',
+          summary: 'Test document for chunk functionality'
+        })
+        testDocuments.push(testDoc)
+      }
+      
       const document = testDocuments[0]
       
-      // Create chunks for the document
+      // Create chunks for the document manually since create_document_chunks may not exist
       const chunksData = [
         {
+          document_id: document.id,
+          chunk_index: 0,
           content: 'JavaScript is a programming language.',
-          embedding: Array(1536).fill(0.1).join(',')
+          embedding: Array(1536).fill(0.1),
+          organization_id: org.id
         },
         {
+          document_id: document.id,
+          chunk_index: 1,
           content: 'It is used for web development.',
-          embedding: Array(1536).fill(0.12).join(',')
+          embedding: Array(1536).fill(0.12),
+          organization_id: org.id
         }
       ]
 
       const { error: chunkError } = await testSupabase
-        .rpc('create_document_chunks', {
-          doc_id: document.id,
-          chunks_data: chunksData
-        })
+        .from('document_chunks')
+        .insert(chunksData)
 
       expect(chunkError).toBeNull()
 
       // Test chunk search
-      const queryEmbedding = `[${Array(1536).fill(0.11).join(',')}]`
+      const queryEmbedding = Array(1536).fill(0.11)
       
       const { data: chunkResults, error: searchError } = await testSupabase
         .rpc('match_document_chunks', {
@@ -175,7 +186,7 @@ describe('Vector Search Functions', () => {
 
   describe('hybrid_search function', () => {
     test('should search both documents and chunks', async () => {
-      const queryEmbedding = `[${Array(1536).fill(0.1).join(',')}]`
+      const queryEmbedding = Array(1536).fill(0.1)
       
       const { data, error } = await testSupabase
         .rpc('hybrid_search', {

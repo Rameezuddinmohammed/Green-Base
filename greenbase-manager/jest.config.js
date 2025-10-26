@@ -17,6 +17,7 @@ const customJestConfig = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   testTimeout: 30000, // Increase timeout for database operations
+  maxWorkers: 1, // Run tests sequentially to avoid race conditions
 }
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

@@ -151,7 +151,7 @@ export async function signInWithOAuth(provider: 'azure' | 'google') {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/auth/callback`,
         scopes: provider === 'azure' 
           ? 'openid profile email https://graph.microsoft.com/Files.Read https://graph.microsoft.com/Group.Read.All'
           : 'openid profile email https://www.googleapis.com/auth/drive.readonly'

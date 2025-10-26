@@ -46,7 +46,8 @@ export async function middleware(req: NextRequest) {
         .eq('id', session.user.id)
         .single()
 
-      if (!user || user.role !== 'manager') {
+      const userProfile = user as any
+      if (!userProfile || userProfile.role !== 'manager') {
         return NextResponse.redirect(new URL('/dashboard', req.url))
       }
     } catch (error) {

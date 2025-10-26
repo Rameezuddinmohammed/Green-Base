@@ -1,3 +1,4 @@
+import React from 'react'
 import { UserRole } from './auth'
 
 // Define permissions for different roles
@@ -125,16 +126,14 @@ export function withRoleGuard<T extends object>(
     const { userRole, ...componentProps } = props
     
     if (!userRole || !hasPermission(userRole, requiredPermission)) {
-      return (
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <h3 className="text-lg font-medium text-gray-900">Access Denied</h3>
-            <p className="text-gray-500">You don't have permission to view this content.</p>
-          </div>
-        </div>
+      return React.createElement('div', { className: "flex items-center justify-center h-64" },
+        React.createElement('div', { className: "text-center" },
+          React.createElement('h3', { className: "text-lg font-medium text-gray-900" }, 'Access Denied'),
+          React.createElement('p', { className: "text-gray-500" }, "You don't have permission to view this content.")
+        )
       )
     }
     
-    return <Component {...(componentProps as T)} />
+    return React.createElement(Component, componentProps as T)
   }
 }

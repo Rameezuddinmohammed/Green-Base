@@ -16,7 +16,7 @@ export async function getServerUser() {
       return null
     }
 
-    // Get user profile
+    // Get user profile - using any type for now since users table is not in generated types
     const { data: profile, error: profileError } = await supabase
       .from('users')
       .select('*')
@@ -27,11 +27,13 @@ export async function getServerUser() {
       return null
     }
 
+    const userProfile = profile as any
+
     return {
-      id: profile.id,
-      email: profile.email,
-      role: profile.role,
-      organizationId: profile.organization_id,
+      id: userProfile.id,
+      email: userProfile.email,
+      role: userProfile.role as UserRole,
+      organizationId: userProfile.organization_id,
       session
     }
   } catch (error) {

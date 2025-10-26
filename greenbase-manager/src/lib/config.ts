@@ -15,6 +15,7 @@ export interface AppConfig {
       endpoint: string
       apiKey: string
       deploymentName: string
+      embeddingDeploymentName: string
     }
     speech: {
       key: string
@@ -72,7 +73,10 @@ class ConfigService {
             : process.env.AZURE_OPENAI_API_KEY!,
           deploymentName: isProduction
             ? await this.keyVaultService.getSecret('azure-openai-deployment-name') || ''
-            : process.env.AZURE_OPENAI_DEPLOYMENT_NAME!
+            : process.env.AZURE_OPENAI_DEPLOYMENT_NAME!,
+          embeddingDeploymentName: isProduction
+            ? await this.keyVaultService.getSecret('azure-openai-embedding-deployment-name') || ''
+            : process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME!
         },
         speech: {
           key: isProduction
