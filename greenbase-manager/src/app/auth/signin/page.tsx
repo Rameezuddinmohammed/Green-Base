@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { supabase } from '@/lib/supabase'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,7 +15,7 @@ function SignInForm() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const redirectTo = searchParams.get('redirectTo') || '/dashboard'
-  const supabase = createClientComponentClient()
+  // Using the shared client from lib/supabase.ts
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,14 +33,18 @@ function SignInForm() {
         return
       }
 
-      // Wait a moment for the session to be established
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Refresh the page to update server-side session
-      router.refresh()
-      
-      // Force a hard redirect to ensure session is picked up
-      window.location.href = redirectTo
+      if (data.session) {
+        // Wait a moment for the session to be established
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        // Refresh the page to update server-side session
+        router.refresh()
+        
+        // Force a hard redirect to ensure session is picked up
+        window.location.href = redirectTo
+      } else {
+        setError('Authentication failed - no session created')
+      }
     } catch (error: any) {
       console.error('Sign in error:', error)
       setError(error.message || 'Invalid credentials')

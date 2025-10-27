@@ -1,335 +1,308 @@
-import { getAzureOpenAIService, ChatMessage } from './azure-openai'
-import { getPIIRedactionService, PIIRedactionResult } from './pii-redaction'
-import { PromptTemplates, ContentStructuringInput, TopicIdentificationInput, ConfidenceAssessmentInput } from './prompt-templates'
-import { ConfidenceScoring, ConfidenceResult, SourceMetadata, ConfidenceWeights } from './confidence-scoring'
-
-export interface ProcessedContent {
-  id: string
-  title: string
-  content: string
-  summary: string
-  topics: string[]
-  confidence: ConfidenceResult
-  piiRedaction: PIIRedactionResult
-  sourceReferences: SourceReference[]
-  metadata: ContentMetadata
-}
+import { getAzureOpenAIService } from './azure-openai'
+import { getPIIRedactionService } from './pii-redaction'
+import { ConfidenceScoring } from './confidence-scoring'
+import { PromptTemplates } from './prompt-templates'
 
 export interface SourceReference {
   sourceType: 'teams' | 'google_drive'
   sourceId: string
-  url?: string
-  snippet: string
-  author?: string
-  timestamp: Date
-}
-
-export interface ContentMetadata {
-  processedAt: Date
-  processingVersion: string
-  aiModelUsed: string
-  tokenUsage: {
-    total: number
-    structuring: number
-    topicIdentification: number
-    confidenceAssessment: number
+  originalContent: string
+  metadata: {
+    author?: string
+    createdAt?: Date
+    sourceUrl?: string
+    [key: string]: any
   }
 }
 
-export interface ContentProcessingOptions {
-  confidenceWeights?: ConfidenceWeights
-  piiRedactionOptions?: {
-    categories?: string[]
-    confidenceThreshold?: number
+export interface AIProcessingResult {
+  structuredContent: string
+  redactedContent: string
+  summary: string
+  topics: string[]
+  confidence: {
+    score: number
+    level: 'green' | 'yellow' | 'red'
+    reasoning: string
   }
-  enableTopicIdentification?: boolean
-  existingTopics?: string[]
+  piiEntities: Array<{
+    text: string
+    category: string
+    confidenceScore: number
+  }>
+  processingTime: number
+  tokensUsed: number
 }
 
 class AIIntegrationService {
   private openAIService = getAzureOpenAIService()
   private piiService = getPIIRedactionService()
-  private processingVersion = '1.0.0'
+  private promptTemplates = PromptTemplates
 
+  /**
+   * Process raw content through the complete AI pipeline
+   */
   async processContent(
-    sourceContent: string[],
-    sourceReferences: SourceReference[],
-    sourceMetadata: SourceMetadata[],
-    options: ContentProcessingOptions = {}
-  ): Promise<ProcessedContent> {
+    rawContent: string,
+    sourceReferences: SourceReference[]
+  ): Promise<AIProcessingResult> {
     const startTime = Date.now()
     let totalTokens = 0
 
     try {
-      // Step 1: PII Redaction
       console.log('Starting PII redaction...')
-      const combinedContent = sourceContent.join('\n\n---\n\n')
-      const piiRedaction = await this.piiService.redactPII(
-        combinedContent,
-        options.piiRedactionOptions
-      )
+      console.log(`Input content length: ${rawContent.length} characters`)
+      
+      // Step 1: PII Redaction
+      const piiResult = await this.piiService.redactPII(rawContent)
+      const redactedContent = piiResult.redactedText
+      
+      console.log(`PII redaction completed. Found ${piiResult.entities.length} entities`)
 
-      // Step 2: Content Structuring
       console.log('Starting content structuring...')
-      const structuringInput: ContentStructuringInput = {
-        sourceContent: [piiRedaction.redactedText],
+      // Step 2: Content Structuring
+      const structuringPrompt = this.promptTemplates.contentStructuring({
+        sourceContent: [redactedContent],
         sourceType: sourceReferences[0]?.sourceType || 'teams',
         metadata: {
-          sourceCount: sourceContent.length,
-          totalLength: combinedContent.length,
-          piiEntitiesFound: piiRedaction.entities.length
+          sourceCount: sourceReferences.length,
+          totalLength: rawContent.length,
+          piiEntitiesFound: piiResult.entities.length
         }
-      }
-
-      const structuringPrompt = PromptTemplates.contentStructuring(structuringInput)
+      })
       const structuringResult = await this.openAIService.chatCompletion([
         { role: 'system', content: structuringPrompt.system },
         { role: 'user', content: structuringPrompt.user }
       ], { temperature: 0.3, maxTokens: 2000 })
 
       totalTokens += structuringResult.usage.totalTokens
+      const structuredContent = structuringResult.content
 
-      // Step 3: Topic Identification (if enabled)
+      // Step 3: Summary Generation (simple extraction from structured content)
+      const summary = this.extractSummary(structuredContent)
+
+      // Step 4: Topic Identification
       let topics: string[] = []
-      let topicTokens = 0
-      if (options.enableTopicIdentification !== false) {
+      if (structuredContent.length > 100) {
         console.log('Starting topic identification...')
-        const topicInput: TopicIdentificationInput = {
-          content: structuringResult.content,
-          existingTopics: options.existingTopics
-        }
-
-        const topicPrompt = PromptTemplates.topicIdentification(topicInput)
+        const topicPrompt = this.promptTemplates.topicIdentification({
+          content: structuredContent
+        })
         const topicResult = await this.openAIService.chatCompletion([
           { role: 'system', content: topicPrompt.system },
           { role: 'user', content: topicPrompt.user }
-        ], { temperature: 0.1, maxTokens: 200 })
+        ], { temperature: 0.2, maxTokens: 200 })
 
-        topicTokens = topicResult.usage.totalTokens
-        totalTokens += topicTokens
-
+        totalTokens += topicResult.usage.totalTokens
+        
+        // Parse topics from AI response
         try {
-          // Extract JSON from response, handling potential markdown or extra text
-          const cleanContent = this.extractJSON(topicResult.content)
-          topics = JSON.parse(cleanContent)
-          if (!Array.isArray(topics)) {
-            throw new Error('Topics result is not an array')
-          }
+          const parsed = JSON.parse(topicResult.content)
+          topics = Array.isArray(parsed) ? parsed.slice(0, 5) : []
         } catch (error) {
-          console.warn('Failed to parse topics JSON, using fallback:', error)
-          topics = ['General']
+          console.warn('Failed to parse topics from AI response:', error)
+          // Fallback to simple extraction
+          const topicLines = topicResult.content.split('\n')
+            .filter(line => line.trim().startsWith('-') || line.trim().startsWith('•'))
+            .map(line => line.replace(/^[-•]\s*/, '').trim())
+            .filter(topic => topic.length > 0)
+          
+          topics = topicLines.slice(0, 5)
         }
       }
 
-      // Step 4: AI-powered Confidence Assessment
       console.log('Starting confidence assessment...')
-      const confidenceInput: ConfidenceAssessmentInput = {
-        structuredContent: structuringResult.content,
-        sourceQuality: this.calculateSourceQuality(sourceMetadata),
-        contentLength: structuringResult.content.length,
-        sourceCount: sourceContent.length
-      }
+      // Step 5: Confidence Assessment
+      const sourceMetadata = sourceReferences.map(ref => ({
+        type: ref.sourceType,
+        authorCount: ref.metadata.author ? 1 : 0,
+        messageCount: ref.sourceType === 'teams' ? 1 : undefined,
+        fileSize: ref.originalContent.length,
+        lastModified: ref.metadata.createdAt || new Date(),
+        participants: ref.metadata.author ? [ref.metadata.author] : []
+      }))
 
-      const confidencePrompt = PromptTemplates.confidenceAssessment(confidenceInput)
+      // Get AI assessment for confidence factors
+      const confidencePrompt = this.promptTemplates.confidenceAssessment({
+        structuredContent,
+        sourceQuality: 0.8, // Default quality score
+        contentLength: structuredContent.length,
+        sourceCount: sourceReferences.length
+      })
       const confidenceResult = await this.openAIService.chatCompletion([
         { role: 'system', content: confidencePrompt.system },
         { role: 'user', content: confidencePrompt.user }
-      ], { temperature: 0.1, maxTokens: 500 })
+      ], { temperature: 0.1, maxTokens: 300 })
 
       totalTokens += confidenceResult.usage.totalTokens
 
+      // Parse AI confidence assessment
       let aiAssessment
       try {
-        const cleanContent = this.extractJSON(confidenceResult.content)
-        aiAssessment = JSON.parse(cleanContent)
+        const parsed = JSON.parse(confidenceResult.content)
+        aiAssessment = {
+          factors: {
+            contentClarity: parsed.factors?.contentClarity,
+            sourceConsistency: parsed.factors?.informationCompleteness, // Map to our system
+            informationDensity: parsed.factors?.factualConsistency
+          }
+        }
       } catch (error) {
-        console.warn('Failed to parse confidence assessment JSON:', error)
-        aiAssessment = null
+        console.warn('Failed to parse AI confidence assessment:', error)
+        // Fallback to regex parsing
+        const assessmentText = confidenceResult.content
+        const clarityMatch = assessmentText.match(/clarity[:\s]*([0-9.]+)/i)
+        const consistencyMatch = assessmentText.match(/consistency[:\s]*([0-9.]+)/i)
+        const densityMatch = assessmentText.match(/density[:\s]*([0-9.]+)/i)
+        
+        aiAssessment = {
+          factors: {
+            contentClarity: clarityMatch ? Math.min(1, parseFloat(clarityMatch[1])) : undefined,
+            sourceConsistency: consistencyMatch ? Math.min(1, parseFloat(consistencyMatch[1])) : undefined,
+            informationDensity: densityMatch ? Math.min(1, parseFloat(densityMatch[1])) : undefined
+          }
+        }
       }
 
-      // Step 5: Final Confidence Scoring
       const confidence = ConfidenceScoring.calculateConfidence(
-        structuringResult.content,
+        structuredContent,
         sourceMetadata,
-        aiAssessment,
-        options.confidenceWeights
+        aiAssessment
       )
-
-      // Step 6: Extract title and summary
-      const { title, summary } = this.extractTitleAndSummary(structuringResult.content)
 
       const processingTime = Date.now() - startTime
       console.log(`Content processing completed in ${processingTime}ms, used ${totalTokens} tokens`)
 
       return {
-        id: this.generateId(),
-        title,
-        content: structuringResult.content,
+        structuredContent,
+        redactedContent,
         summary,
         topics,
-        confidence,
-        piiRedaction,
-        sourceReferences,
-        metadata: {
-          processedAt: new Date(),
-          processingVersion: this.processingVersion,
-          aiModelUsed: 'gpt-4',
-          tokenUsage: {
-            total: totalTokens,
-            structuring: structuringResult.usage.totalTokens,
-            topicIdentification: topicTokens,
-            confidenceAssessment: confidenceResult.usage.totalTokens
-          }
-        }
+        confidence: {
+          score: confidence.score,
+          level: confidence.level,
+          reasoning: confidence.reasoning
+        },
+        piiEntities: piiResult.entities.map(entity => ({
+          text: entity.text,
+          category: entity.category,
+          confidenceScore: entity.confidenceScore
+        })),
+        processingTime,
+        tokensUsed: totalTokens
       }
+
     } catch (error) {
-      console.error('Content processing failed:', error)
-      throw new Error(`AI content processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('AI processing error:', error)
+      throw new Error(`AI processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
-  async recognizeIntent(
-    userInput: string,
-    availableDocuments: string[]
-  ): Promise<{
-    intent: 'add' | 'modify' | 'delete' | 'create_new'
-    targetDocument: string | null
-    proposedChanges: string
-    confidence: number
-    newContent?: string
-  }> {
-    const prompt = PromptTemplates.intentRecognition(userInput, availableDocuments)
+  /**
+   * Extract a summary from structured content
+   */
+  private extractSummary(content: string): string {
+    // Simple summary extraction - take first paragraph or create from headings
+    const lines = content.split('\n').filter(line => line.trim())
     
-    const result = await this.openAIService.chatCompletion([
-      { role: 'system', content: prompt.system },
-      { role: 'user', content: prompt.user }
-    ], { temperature: 0.2, maxTokens: 500 })
-
-    try {
-      const cleanContent = this.extractJSON(result.content)
-      return JSON.parse(cleanContent)
-    } catch (error) {
-      console.error('Failed to parse intent recognition result:', error)
-      throw new Error('Intent recognition failed')
+    // Look for existing summary section
+    const summaryIndex = lines.findIndex(line => 
+      line.toLowerCase().includes('summary') || 
+      line.toLowerCase().includes('overview')
+    )
+    
+    if (summaryIndex >= 0 && summaryIndex < lines.length - 1) {
+      const summaryContent = lines.slice(summaryIndex + 1, summaryIndex + 4)
+        .filter(line => !line.startsWith('#'))
+        .join(' ')
+        .trim()
+      
+      if (summaryContent.length > 50) {
+        return summaryContent.substring(0, 200) + (summaryContent.length > 200 ? '...' : '')
+      }
     }
+    
+    // Fallback: create summary from headings and first content
+    const headings = lines.filter(line => line.startsWith('#')).slice(0, 3)
+    const firstContent = lines.find(line => !line.startsWith('#') && line.length > 20)
+    
+    if (headings.length > 0) {
+      const topics = headings.map(h => h.replace(/^#+\s*/, '')).join(', ')
+      return `Document covering: ${topics}. ${firstContent ? firstContent.substring(0, 100) + '...' : ''}`
+    }
+    
+    // Final fallback
+    return content.substring(0, 200) + (content.length > 200 ? '...' : '')
   }
 
-  async answerQuestion(
-    question: string,
-    contextDocuments: string[]
+  /**
+   * Process content for Q&A (simpler pipeline for real-time responses)
+   */
+  async processForQA(
+    content: string,
+    question: string
   ): Promise<{
     answer: string
     confidence: number
+    sources: string[]
     tokensUsed: number
   }> {
-    const prompt = PromptTemplates.questionAnswering(question, contextDocuments)
-    
-    const result = await this.openAIService.chatCompletion([
-      { role: 'system', content: prompt.system },
-      { role: 'user', content: prompt.user }
-    ], { temperature: 0.3, maxTokens: 1000 })
+    try {
+      const qaPrompt = this.promptTemplates.questionAnswering(question, [content])
+      const result = await this.openAIService.chatCompletion([
+        { role: 'system', content: qaPrompt.system },
+        { role: 'user', content: qaPrompt.user }
+      ], { temperature: 0.2, maxTokens: 500 })
 
-    // Simple confidence estimation based on response characteristics
-    const confidence = this.estimateAnswerConfidence(result.content, contextDocuments.length)
-
-    return {
-      answer: result.content,
-      confidence,
-      tokensUsed: result.usage.totalTokens
-    }
-  }
-
-  private calculateSourceQuality(sourceMetadata: SourceMetadata[]): number {
-    if (sourceMetadata.length === 0) return 0.5
-
-    let totalQuality = 0
-    for (const source of sourceMetadata) {
-      let quality = 0.5 // Base quality
-
-      // Recent content is higher quality
-      const ageInDays = (Date.now() - source.lastModified.getTime()) / (1000 * 60 * 60 * 24)
-      if (ageInDays < 30) quality += 0.2
-      else if (ageInDays < 90) quality += 0.1
-
-      // Multiple authors/participants increase quality
-      if (source.authorCount > 1) quality += 0.1
-      if (source.participants && source.participants.length > 2) quality += 0.1
-
-      // Teams with many messages indicate active discussion
-      if (source.type === 'teams' && source.messageCount && source.messageCount > 5) {
-        quality += 0.1
+      // Extract confidence from response if available
+      let confidence = 0.8 // Default confidence
+      const confidenceMatch = result.content.match(/confidence[:\s]*([0-9.]+)/i)
+      if (confidenceMatch) {
+        confidence = Math.min(1, parseFloat(confidenceMatch[1]))
       }
 
-      totalQuality += Math.min(1, quality)
-    }
+      return {
+        answer: result.content,
+        confidence,
+        sources: [], // Would be populated by the calling service
+        tokensUsed: result.usage.totalTokens
+      }
 
-    return totalQuality / sourceMetadata.length
+    } catch (error) {
+      console.error('QA processing error:', error)
+      throw new Error(`QA processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
   }
 
-  private extractTitleAndSummary(content: string): { title: string; summary: string } {
-    const lines = content.split('\n').filter(line => line.trim())
+  /**
+   * Batch process multiple content items
+   */
+  async batchProcessContent(
+    contentItems: Array<{
+      content: string
+      sourceReferences: SourceReference[]
+    }>
+  ): Promise<AIProcessingResult[]> {
+    const results: AIProcessingResult[] = []
     
-    // Try to find a title (first heading or first line)
-    let title = 'Untitled Document'
-    for (const line of lines) {
-      if (line.startsWith('#')) {
-        title = line.replace(/^#+\s*/, '').trim()
-        break
-      } else if (line.trim() && !line.includes(':')) {
-        title = line.trim()
-        break
+    // Process in batches to avoid rate limits
+    const batchSize = 3
+    for (let i = 0; i < contentItems.length; i += batchSize) {
+      const batch = contentItems.slice(i, i + batchSize)
+      const batchPromises = batch.map(item => 
+        this.processContent(item.content, item.sourceReferences)
+      )
+      
+      try {
+        const batchResults = await Promise.all(batchPromises)
+        results.push(...batchResults)
+      } catch (error) {
+        console.error(`Batch processing error for batch ${i / batchSize + 1}:`, error)
+        throw error
       }
     }
 
-    // Create summary from first few sentences
-    const sentences = content.replace(/#+\s*[^\n]*\n/g, '').split(/[.!?]+/)
-      .map(s => s.trim())
-      .filter(s => s.length > 10)
-
-    const summary = sentences.slice(0, 2).join('. ') + (sentences.length > 2 ? '.' : '')
-
-    return {
-      title: title.substring(0, 100), // Limit title length
-      summary: summary.substring(0, 300) // Limit summary length
-    }
-  }
-
-  private estimateAnswerConfidence(answer: string, contextCount: number): number {
-    let confidence = 0.5 // Base confidence
-
-    // More context generally means higher confidence
-    confidence += Math.min(0.3, contextCount * 0.1)
-
-    // Specific indicators in the answer
-    if (answer.includes('According to') || answer.includes('Based on')) confidence += 0.1
-    if (answer.includes("I don't have enough information") || answer.includes("not clear")) confidence -= 0.2
-    if (answer.length > 100) confidence += 0.1 // Detailed answers are often more confident
-
-    return Math.max(0.1, Math.min(1, confidence))
-  }
-
-  private extractJSON(content: string): string {
-    // Remove markdown code blocks
-    let cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '')
-    
-    // Try to extract JSON from content that might have markdown or extra text
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
-    if (jsonMatch) {
-      return jsonMatch[0]
-    }
-    
-    // If no JSON found, try to find array-like content
-    const arrayMatch = cleaned.match(/\[[\s\S]*?\]/)
-    if (arrayMatch) {
-      return arrayMatch[0]
-    }
-    
-    // If still no JSON, return a safe fallback
-    return '[]'
-  }
-
-  private generateId(): string {
-    return `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    return results
   }
 }
 

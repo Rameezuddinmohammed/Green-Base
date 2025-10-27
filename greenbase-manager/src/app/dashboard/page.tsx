@@ -16,7 +16,7 @@ import {
   TrendingUp,
   Settings
 } from "lucide-react"
-import { AIAssistantPanel } from "@/components/ai-assistant-panel"
+// import { AIAssistantPanel } from "@/components/ai-assistant-panel"
 
 interface DashboardStats {
   totalDocuments: number
@@ -41,7 +41,7 @@ export default function DashboardPage() {
     recentActivity: []
   })
   const [loading, setLoading] = useState(true)
-  const [aiPanelOpen, setAiPanelOpen] = useState(false)
+  // const [aiPanelOpen, setAiPanelOpen] = useState(false)
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -102,13 +102,13 @@ export default function DashboardPage() {
     fetchStats()
   }, [])
 
-  // Auto-open AI panel when there are actionable insights
-  useEffect(() => {
-    if (!loading && (stats.pendingApprovals > 5 || stats.avgConfidenceScore < 0.7)) {
-      const timer = setTimeout(() => setAiPanelOpen(true), 2000)
-      return () => clearTimeout(timer)
-    }
-  }, [loading, stats])
+  // Auto-open AI panel when there are actionable insights - Commented out
+  // useEffect(() => {
+  //   if (!loading && (stats.pendingApprovals > 5 || stats.avgConfidenceScore < 0.7)) {
+  //     const timer = setTimeout(() => setAiPanelOpen(true), 2000)
+  //     return () => clearTimeout(timer)
+  //   }
+  // }, [loading, stats])
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -148,18 +148,55 @@ export default function DashboardPage() {
                   AI-powered knowledge management at a glance
                 </p>
               </div>
-              <Button 
-                onClick={() => setAiPanelOpen(true)}
-                className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700"
-              >
-                <Sparkles className="h-4 w-4 mr-2" />
-                AI Assistant
-                {(stats.pendingApprovals > 5 || stats.avgConfidenceScore < 0.7) && (
-                  <Badge className="ml-2 bg-orange-500 hover:bg-orange-500 animate-pulse">
-                    !
-                  </Badge>
-                )}
-              </Button>
+              
+              <div className="flex items-center space-x-2">
+                {/* Test OAuth Button */}
+                <Button 
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/test-oauth?provider=microsoft')
+                      const result = await response.json()
+                      alert(`OAuth Test Results:\n${JSON.stringify(result, null, 2)}`)
+                    } catch (error) {
+                      console.error('Failed to test OAuth:', error)
+                    }
+                  }}
+                >
+                  Test OAuth
+                </Button>
+                
+                {/* Test Data Button */}
+                <Button 
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/test-data', { method: 'POST' })
+                      if (response.ok) {
+                        window.location.reload()
+                      }
+                    } catch (error) {
+                      console.error('Failed to create test data:', error)
+                    }
+                  }}
+                >
+                  Create Test Data
+                </Button>
+                
+                {/* AI Assistant Button - Commented out for now */}
+                {/* <Button 
+                  onClick={() => setAiPanelOpen(true)}
+                  className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700"
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI Assistant
+                  {(stats.pendingApprovals > 5 || stats.avgConfidenceScore < 0.7) && (
+                    <Badge className="ml-2 bg-orange-500 hover:bg-orange-500 animate-pulse">
+                      !
+                    </Badge>
+                  )}
+                </Button> */}
+              </div>
             </div>
 
             {/* 2-Column Grid Layout as per Plan */}
@@ -342,8 +379,8 @@ export default function DashboardPage() {
                           </Badge>
                         )}
                       </div>
-                      <Button variant="outline" size="sm">
-                        View All
+                      <Button variant="outline" size="sm" asChild>
+                        <a href="/dashboard/approvals">View All</a>
                       </Button>
                     </CardTitle>
                     <CardDescription>Documents awaiting your review</CardDescription>
@@ -402,12 +439,12 @@ export default function DashboardPage() {
         </div>
       </DashboardLayout>
 
-      {/* AI Assistant Panel */}
-      <AIAssistantPanel 
+      {/* AI Assistant Panel - Commented out for now */}
+      {/* <AIAssistantPanel 
         isOpen={aiPanelOpen}
         onClose={() => setAiPanelOpen(false)}
         stats={stats}
-      />
+      /> */}
     </div>
   )
 }

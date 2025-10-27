@@ -386,14 +386,33 @@ export class OAuthService {
         return allMessages
 
       case 'google_drive':
-        // Get files from selected folders
+        // Get files from selected folders and fetch their content
         const folders = source.selected_folders || []
         const allFiles = []
 
         for (const folderId of folders) {
           try {
             const files = await this.googleService.getDriveItems(userId, folderId)
-            allFiles.push(...files)
+            
+            // Fetch content for each file (not folders)
+            for (const file of files) {
+              if (file.file && !file.folder) {
+                try {
+                  const content = await this.googleService.getFileContent(userId, file.id)
+                  allFiles.push({
+                    ...file,
+                    content // Add the actual file content
+                  })
+                } catch (error) {
+                  console.warn(`Failed to get content for file ${file.name}:`, error)
+                  // Still include the file but without content
+                  allFiles.push({
+                    ...file,
+                    content: `[Unable to read content from ${file.name}]`
+                  })
+                }
+              }
+            }
           } catch (error) {
             console.warn(`Failed to get files from folder ${folderId}:`, error)
           }

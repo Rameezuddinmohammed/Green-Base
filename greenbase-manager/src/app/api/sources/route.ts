@@ -1,15 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOAuthService } from '../../../lib/oauth/oauth-service'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { getDemoStorage } from '../../../lib/demo-storage'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options)
+            })
+          },
+        },
+      }
+    )
     const { data: { session } } = await supabase.auth.getSession()
     
     if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      // For testing without authentication, use demo storage
+      console.log('No session found, using demo storage for sources')
+      const demoStorage = getDemoStorage()
+      const sources = demoStorage.getAllSources()
+      return NextResponse.json({ sources })
     }
 
     const oauthService = getOAuthService()
@@ -27,7 +48,23 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options)
+            })
+          },
+        },
+      }
+    )
     const { data: { session } } = await supabase.auth.getSession()
     
     if (!session?.user?.email) {

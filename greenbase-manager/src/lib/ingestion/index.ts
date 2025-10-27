@@ -1,12 +1,10 @@
-// Content Ingestion Service
+// Ingestion Service
 export {
-  getContentIngestionService,
-  ContentIngestionService,
-  type IngestionSource,
-  type IngestionJob,
-  type IngestionResult,
-  type ContentChunk
-} from './content-ingestion-service'
+  getIngestionService,
+  IngestionService,
+  type SourceContent,
+  type IngestionResult
+} from './ingestion-service'
 
 // Document Chunking
 export {

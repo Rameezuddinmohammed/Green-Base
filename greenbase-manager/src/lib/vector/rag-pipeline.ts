@@ -83,7 +83,7 @@ class RAGPipeline {
       )
 
       // Step 3: Generate answer using AI service
-      const aiResponse = await this.aiService.answerQuestion(query.question, contextDocuments)
+      const aiResponse = await this.aiService.processForQA(contextDocuments.join('\n\n'), query.question)
 
       // Step 4: Prepare sources with metadata
       const sources = await this.prepareSources(searchResults)
