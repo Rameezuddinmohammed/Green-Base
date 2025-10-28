@@ -23,29 +23,40 @@ export interface ConfidenceAssessmentInput {
 export class PromptTemplates {
   static contentStructuring(input: ContentStructuringInput) {
     return {
-      system: `You are an expert content structurer. Your task is to take raw content from ${input.sourceType} and create a well-structured, coherent document.
+      system: `You are an expert at creating Standard Operating Procedures (SOPs) and internal wiki documentation. Transform raw content into professional, actionable documentation.
 
-Guidelines:
-- Create clear headings and sections
+CRITICAL REQUIREMENTS:
+- Use numbered lists for procedures and step-by-step instructions
+- Create clear, descriptive headings (use ## for main sections)
+- Write in clear, unambiguous, actionable language
+- Remove conversational filler and casual language
+- Organize information logically
+- Use bullet points for lists of items (not procedures)
 - Maintain factual accuracy
-- Remove redundant information
-- Use proper markdown formatting
-- Preserve important details and context
-- Ensure the content flows logically
+- Ensure professional tone throughout
+
+FORMATTING STANDARDS:
+- Title: # Main Title
+- Sections: ## Section Name
+- Procedures: Use numbered lists (1., 2., 3.)
+- Lists: Use bullet points (-)
+- Important notes: Use **bold** for emphasis
 
 The content has been processed for PII removal (${input.metadata.piiEntitiesFound} entities found).`,
 
-      user: `Please structure the following content from ${input.metadata.sourceCount} source(s):
+      user: `Transform the following raw content into a professional SOP or wiki article:
 
 ${input.sourceContent.join('\n\n---\n\n')}
 
 Create a well-structured document with:
-1. A clear title
-2. Organized sections with headings
-3. Bullet points or numbered lists where appropriate
-4. A brief summary at the end
+1. A clear, descriptive title
+2. Organized sections with ## headings
+3. Numbered lists for procedures/steps
+4. Bullet points for non-sequential information
+5. Professional, actionable language
+6. A brief "Overview" or "Summary" section at the top
 
-Return only the structured content in markdown format.`
+Return ONLY the structured markdown content (no explanations or meta-commentary).`
     }
   }
 
@@ -74,30 +85,62 @@ Return your response as a JSON array of topic strings, for example: ["HR Policy"
 
   static confidenceAssessment(input: ConfidenceAssessmentInput) {
     return {
-      system: `You are a content quality assessor. Evaluate the given structured content and provide confidence metrics.
+      system: `You are a professional content quality assessor for Standard Operating Procedures (SOPs) and internal wiki documentation. Be thorough and fair in your evaluation, but consider both the final structured output AND the quality of the original source material it was derived from.
 
-Assess these factors (0.0 to 1.0):
-- contentClarity: How well-structured and clear is the content?
-- informationCompleteness: How complete and comprehensive is the information?
-- factualConsistency: How consistent and reliable does the information appear?
+CRITICAL: If the structured content appears polished but was derived from poor, fragmented, or incomplete source material, assign lower scores for informationCompleteness and factualConsistency, even if the final structure looks good. The AI may have inferred or added information that wasn't in the original source.
 
-Consider:
+Assess these factors (0.0 to 1.0) - BE THOROUGH BUT FAIR:
+
+**contentClarity** (0.7+ for well-structured docs, 0.8+ for exceptional):
+- Clear, numbered steps or well-organized sections?
+- Unambiguous, actionable language?
+- Proper headings and logical flow?
+- Professional formatting?
+
+**informationCompleteness** (0.7+ for complete docs, 0.8+ for comprehensive):
+- All necessary details present in ORIGINAL source?
+- No missing steps or unclear references that had to be inferred?
+- Sufficient context and examples from source material?
+- Complete procedures from start to finish in original?
+- PENALTY: If AI had to significantly expand or infer content, lower this score
+
+**factualConsistency** (0.7+ for reliable content, 0.8+ for exceptional):
+- Consistent terminology throughout original source?
+- No contradictions or ambiguities in source material?
+- Verifiable and specific information from original?
+- Professional and authoritative tone in source?
+- PENALTY: If final content is much more polished than fragmented source, lower this score
+
+RED FLAGS (should lower scores significantly):
+- Vague language ("maybe", "probably", "I think")
+- Missing critical steps or information
+- Conversational/casual tone without substance
+- Questions instead of clear statements
+- Very short content (< 200 chars)
+- Poor structure or formatting
+- Excessive repetition or redundancy
+- Unclear or ambiguous instructions
+
+Context:
 - Source quality: ${input.sourceQuality}
 - Content length: ${input.contentLength} characters
-- Number of sources: ${input.sourceCount}`,
+- Number of sources: ${input.sourceCount}
 
-      user: `Assess the quality and confidence level of this structured content:
+IMPORTANT: Consider whether the structured content represents genuine quality from the original source, or if it's artificially polished by AI processing of poor source material.`,
 
-${input.structuredContent}
+      user: `Assess this content as an SOP or wiki article. Be thorough and fair - well-structured, complete documentation should score 0.7-0.8, exceptional content should score 0.8+, and poor content should score below 0.6.
 
-Return your assessment as JSON with this structure:
+Content to assess:
+${input.structuredContent.substring(0, 2000)}${input.structuredContent.length > 2000 ? '...' : ''}
+
+You MUST return ONLY valid JSON in exactly this format (no additional text):
 {
   "factors": {
-    "contentClarity": 0.8,
-    "informationCompleteness": 0.7,
-    "factualConsistency": 0.9
+    "contentClarity": 0.45,
+    "informationCompleteness": 0.38,
+    "factualConsistency": 0.52
   },
-  "overallConfidence": 0.8,
+  "overallConfidence": 0.42,
   "reasoning": "Brief explanation of the assessment"
 }`
     }

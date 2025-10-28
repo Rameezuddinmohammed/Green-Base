@@ -158,16 +158,39 @@ export class GoogleDriveService {
 
       const files = response.data.files || []
       
-      return files.map((file: any) => ({
-        id: file.id!,
-        name: file.name!,
-        webUrl: file.webViewLink!,
-        folder: file.mimeType === 'application/vnd.google-apps.folder' ? { childCount: 0 } : undefined,
-        file: file.mimeType !== 'application/vnd.google-apps.folder' ? { mimeType: file.mimeType! } : undefined,
-        createdDateTime: file.createdTime!,
-        lastModifiedDateTime: file.modifiedTime!,
-        size: file.size ? parseInt(file.size) : undefined
+      // Process files and get child counts for folders
+      const items = await Promise.all(files.map(async (file: any) => {
+        let childCount = 0
+        
+        // If it's a folder, get the child count
+        if (file.mimeType === 'application/vnd.google-apps.folder') {
+          try {
+            const childQuery = `'${file.id}' in parents and trashed=false`
+            const childResponse = await drive.files.list({
+              q: childQuery,
+              pageSize: 1000, // Get all children to count them
+              fields: 'files(id)'
+            })
+            childCount = childResponse.data.files?.length || 0
+          } catch (error) {
+            console.warn(`Failed to get child count for folder ${file.name}:`, error)
+            childCount = 0
+          }
+        }
+        
+        return {
+          id: file.id!,
+          name: file.name!,
+          webUrl: file.webViewLink!,
+          folder: file.mimeType === 'application/vnd.google-apps.folder' ? { childCount } : undefined,
+          file: file.mimeType !== 'application/vnd.google-apps.folder' ? { mimeType: file.mimeType! } : undefined,
+          createdDateTime: file.createdTime!,
+          lastModifiedDateTime: file.modifiedTime!,
+          size: file.size ? parseInt(file.size) : undefined
+        }
       }))
+      
+      return items
     } catch (error) {
       throw new OAuthError(`Failed to get drive items: ${error}`, 'GET_DRIVE_ITEMS_ERROR')
     }
@@ -312,6 +335,93 @@ export class GoogleDriveService {
     }
     
     throw lastError || new Error('Max retries exceeded')
+  }
+
+  /**
+   * Get changes using Google Drive Changes API
+   * This is the efficient way to detect only changed files
+   */
+  async getChanges(userId: string, startPageToken?: string): Promise<{
+    changes: any[]
+    newStartPageToken: string
+    hasMore: boolean
+  }> {
+    try {
+      const drive = await this.getDriveClient(userId)
+      
+      // If no start token provided, get the current one
+      if (!startPageToken) {
+        const tokenResponse = await drive.changes.getStartPageToken()
+        startPageToken = tokenResponse.data.startPageToken!
+        
+        // Return empty changes for initial token
+        return {
+          changes: [],
+          newStartPageToken: startPageToken,
+          hasMore: false
+        }
+      }
+
+      const response = await drive.changes.list({
+        pageToken: startPageToken,
+        pageSize: 100,
+        fields: 'changes(file(id,name,mimeType,parents,modifiedTime,trashed),fileId,removed),newStartPageToken,nextPageToken'
+      })
+
+      return {
+        changes: response.data.changes || [],
+        newStartPageToken: response.data.newStartPageToken || startPageToken,
+        hasMore: !!response.data.nextPageToken
+      }
+    } catch (error) {
+      throw new OAuthError(`Failed to get changes: ${error}`, 'GET_CHANGES_ERROR')
+    }
+  }
+
+  /**
+   * Get the current start page token for changes API
+   */
+  async getStartPageToken(userId: string): Promise<string> {
+    try {
+      const drive = await this.getDriveClient(userId)
+      const response = await drive.changes.getStartPageToken()
+      return response.data.startPageToken!
+    } catch (error) {
+      throw new OAuthError(`Failed to get start page token: ${error}`, 'GET_START_PAGE_TOKEN_ERROR')
+    }
+  }
+
+  /**
+   * Check if a file is in any of the selected folders (including subfolders)
+   */
+  async isFileInSelectedFolders(userId: string, fileId: string, selectedFolders: string[]): Promise<boolean> {
+    try {
+      const drive = await this.getDriveClient(userId)
+      
+      // Get file metadata to check parents
+      const fileResponse = await drive.files.get({
+        fileId,
+        fields: 'parents'
+      })
+
+      const parents = fileResponse.data.parents || []
+      
+      // Check if any parent is in selected folders
+      for (const parent of parents) {
+        if (selectedFolders.includes(parent)) {
+          return true
+        }
+        
+        // TODO: For more comprehensive checking, we could recursively check parent folders
+        // This would handle cases where files are in subfolders of selected folders
+      }
+
+      return false
+    } catch (error) {
+      // If we can't check the file, assume it's not in selected folders
+      console.warn(`Could not check file ${fileId} parents:`, error)
+      return false
+    }
   }
 
   /**

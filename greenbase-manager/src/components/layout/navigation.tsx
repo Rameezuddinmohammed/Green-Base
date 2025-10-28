@@ -18,7 +18,7 @@ import {
   Sun,
   LogOut
 } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/components/auth/auth-provider"
 
 
 interface NavigationProps {
@@ -28,13 +28,13 @@ interface NavigationProps {
 export function Navigation({ pendingCount = 0 }: NavigationProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const { user, signOut } = useAuth()
   const [isDark, setIsDark] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [mounted, setMounted] = useState(false)
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/auth/signin')
+    await signOut()
   }
 
   // Prevent hydration mismatch

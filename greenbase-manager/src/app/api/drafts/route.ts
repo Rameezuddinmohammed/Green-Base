@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden - Manager access required' }, { status: 403 })
     }
 
-    // Fetch all pending draft documents for the organization
+    // Fetch all pending draft documents for the organization with source documents
     const { data: drafts, error } = await supabaseAdmin
       .from('draft_documents')
       .select(`
@@ -53,10 +53,19 @@ export async function GET(request: NextRequest) {
         summary,
         topics,
         confidence_score,
+        confidence_reasoning,
         triage_level,
         created_at,
         source_references,
-        status
+        status,
+        source_documents (
+          id,
+          source_type,
+          source_id,
+          original_content,
+          redacted_content,
+          metadata
+        )
       `)
       .eq('organization_id', user.organization_id)
       .eq('status', 'pending')

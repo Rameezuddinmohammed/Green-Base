@@ -162,20 +162,63 @@ export function SourceManagement() {
     }
   }
 
-  const handleSyncNow = async (sourceId: string, e: React.MouseEvent) => {
+  const handleManualSync = async (sourceId: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    
+    // Find the source to show its name
+    const source = sources.find(s => s.id === sourceId)
+    const sourceName = source?.name || 'Unknown Source'
+    
     try {
-      const response = await fetch(`/api/sources/${sourceId}/ingest`, {
-        method: 'POST'
+      console.log(`🔄 Starting manual sync for: ${sourceName}`)
+      
+      const response = await fetch(`/api/sources/${sourceId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ syncType: 'manual' })
       })
       
-      if (response.ok) {
+      console.log(`📡 Sync API response status: ${response.status}`)
+      
+      let result
+      try {
+        result = await response.json()
+        console.log(`📋 Sync API response:`, result)
+      } catch (parseError) {
+        console.error(`❌ Failed to parse sync response as JSON:`, parseError)
+        console.error(`📄 Raw response:`, await response.text())
+        throw new Error(`Invalid JSON response from sync API (status: ${response.status})`)
+      }
+      
+      if (response.ok && result.success) {
+        console.log(`✅ Manual sync completed for ${sourceName}:`, result.message)
+        
+        // Show success feedback (you could add a toast notification here)
+        if (result.operation?.itemsCreated > 0) {
+          console.log(`📄 Created ${result.operation.itemsCreated} new documents`)
+        } else {
+          console.log(`ℹ️ No new changes found`)
+        }
+        
+        // Reload sources to update last sync time
         await loadSources()
+      } else {
+        console.error(`❌ Manual sync failed for ${sourceName}:`, result.error || result.message)
+        console.error(`📊 Full error response:`, result)
+        // You could show an error toast here
       }
     } catch (error) {
-      console.error('Failed to sync source:', error)
+      console.error(`❌ Failed to sync source ${sourceName}:`, error)
+      console.error(`📊 Error details:`, {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      })
+      // You could show an error toast here
     }
   }
+
+
 
   const getSourceStatusBadge = (source: ConnectedSource) => {
     if (!source.isActive) {
@@ -332,6 +375,14 @@ export function SourceManagement() {
                         </span>
                       )}
                     </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-xs text-green-600">
+                        🔄 Auto-sync enabled (every 15 min)
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        Manual sync available
+                      </span>
+                    </div>
                     {source.selectedChannels?.length && (
                       <span className="block text-xs mt-1 text-primary-600">
                         📺 {source.selectedChannels.length} channels selected
@@ -356,13 +407,13 @@ export function SourceManagement() {
                       Configure
                     </Button>
                     
-                    {/* Sync Now button - appears on hover */}
+                    {/* Manual Sync Button - for immediate processing */}
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={(e) => handleSyncNow(source.id, e)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Sync now"
+                      onClick={(e) => handleManualSync(source.id, e)}
+                      className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                      title="Check for changes now"
                     >
                       <RefreshCw className="w-3 h-3" />
                     </Button>

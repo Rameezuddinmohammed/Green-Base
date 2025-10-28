@@ -4,29 +4,35 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { 
   CheckCircle, 
   XCircle, 
-  Clock, 
   Edit, 
-  AlertTriangle, 
   ThumbsUp, 
-  Eye,
   Filter,
   ArrowUpDown,
   FileText,
   User,
   Calendar,
   Tag,
-  Zap,
   GitCompare,
   Sparkles
 } from "lucide-react"
+
+interface SourceDocument {
+  id: string
+  source_type: string
+  source_id: string
+  original_content: string
+  redacted_content: string
+  metadata: any
+}
 
 interface DraftDocument {
   id: string
@@ -36,11 +42,12 @@ interface DraftDocument {
   summary?: string
   topics?: string[]
   confidence_score: number
+  confidence_reasoning?: string
   triage_level?: 'red' | 'yellow' | 'green'
   created_at: string
   source_references?: any[]
+  source_documents?: SourceDocument[]
   status: string
-  confidence_reasoning?: string
   author?: string
   changes_made?: string[]
 }
@@ -57,9 +64,9 @@ function ConfidenceRing({ score, size = 40 }: ConfidenceRingProps) {
   const strokeDashoffset = circumference - (percentage / 100) * circumference
   
   const getColor = (score: number) => {
-    if (score >= 0.8) return "hsl(142, 76%, 36%)" // green-600
-    if (score >= 0.5) return "hsl(32, 95%, 44%)" // orange-500
-    return "hsl(0, 84%, 60%)" // red-500
+    if (score >= 0.8) return "hsl(142, 76%, 36%)" // green-600 ≥80%
+    if (score >= 0.6) return "hsl(32, 95%, 44%)" // orange-500 ≥60%
+    return "hsl(0, 84%, 60%)" // red-500 <60%
   }
 
   return (
@@ -98,7 +105,7 @@ function ConfidenceRing({ score, size = 40 }: ConfidenceRingProps) {
 export function ApprovalQueueEnhanced() {
   const [drafts, setDrafts] = useState<DraftDocument[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedDrafts, setSelectedDrafts] = useState<string[]>([])
+
   const [editingDraft, setEditingDraft] = useState<DraftDocument | null>(null)
   const [editedContent, setEditedContent] = useState("")
   const [expandedDiff, setExpandedDiff] = useState<string | null>(null)
@@ -116,36 +123,36 @@ export function ApprovalQueueEnhanced() {
         return // Don't trigger shortcuts when typing in inputs
       }
 
-      const focusedDraft = drafts.find(d => d.id === selectedDrafts[0])
+      // Batch operations require Ctrl+Shift for safety
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        // Batch approve all green items
+        handleBatchApproveAllGreen()
+        return
+      }
       
-      switch (e.key.toLowerCase()) {
-        case 'a':
-          e.preventDefault()
-          if (selectedDrafts.length > 0) {
-            handleBatchApprove()
-          } else if (focusedDraft) {
-            handleApprove(focusedDraft.id)
-          }
-          break
-        case 'r':
-          e.preventDefault()
-          if (focusedDraft) {
-            handleReject(focusedDraft.id)
-          }
-          break
-        case 'e':
-          e.preventDefault()
-          if (focusedDraft) {
-            setEditingDraft(focusedDraft)
-            setEditedContent(focusedDraft.content)
-          }
-          break
+      // Individual item shortcuts with Ctrl modifier for safety
+      if (e.ctrlKey && !e.shiftKey) {
+        switch (e.key.toLowerCase()) {
+          case 'a':
+            e.preventDefault()
+            // TODO: Handle individual approve for focused item
+            break
+          case 'e':
+            e.preventDefault()
+            // TODO: Handle individual edit for focused item
+            break
+          case 'r':
+            e.preventDefault()
+            // TODO: Handle individual reject for focused item
+            break
+        }
       }
     }
 
     document.addEventListener('keydown', handleKeyPress)
     return () => document.removeEventListener('keydown', handleKeyPress)
-  }, [selectedDrafts, drafts])
+  }, [drafts])
 
   const loadDrafts = async () => {
     try {
@@ -161,22 +168,7 @@ export function ApprovalQueueEnhanced() {
     }
   }
 
-  const handleBatchApprove = async () => {
-    try {
-      const response = await fetch('/api/drafts/batch-approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ draftIds: selectedDrafts })
-      })
-      
-      if (response.ok) {
-        await loadDrafts()
-        setSelectedDrafts([])
-      }
-    } catch (error) {
-      console.error('Failed to batch approve:', error)
-    }
-  }
+
 
   const handleApprove = async (draftId: string) => {
     try {
@@ -227,8 +219,8 @@ export function ApprovalQueueEnhanced() {
   }
 
   const getConfidenceLevel = (score: number) => {
-    if (score >= 0.8) return 'high'
-    if (score >= 0.5) return 'medium'
+    if (score >= 0.85) return 'high'
+    if (score >= 0.60) return 'medium'
     return 'low'
   }
 
@@ -262,6 +254,28 @@ export function ApprovalQueueEnhanced() {
 
   const pendingDrafts = filteredAndSortedDrafts.filter(draft => draft.status === 'pending')
 
+  const handleBatchApproveAllGreen = async () => {
+    try {
+      // Get all green items from current filtered list
+      const greenItems = pendingDrafts.filter((draft: DraftDocument) => draft.triage_level === 'green')
+      const greenIds = greenItems.map((draft: DraftDocument) => draft.id)
+      
+      if (greenIds.length === 0) return
+      
+      const response = await fetch('/api/drafts/batch-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentIds: greenIds })
+      })
+      
+      if (response.ok) {
+        await loadDrafts()
+      }
+    } catch (error) {
+      console.error('Failed to batch approve:', error)
+    }
+  }
+
   if (loading) {
     return (
       <Card>
@@ -275,9 +289,10 @@ export function ApprovalQueueEnhanced() {
               <CardDescription>
                 AI-processed documents awaiting review
                 <span className="ml-4 text-xs text-muted-foreground">
-                  Shortcuts: <kbd className="px-1 py-0.5 bg-muted rounded text-xs">A</kbd> approve 
-                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">R</kbd> reject 
-                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">E</kbd> edit
+                  Individual: <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+A</kbd> approve 
+                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+R</kbd> reject 
+                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+E</kbd> edit
+                  • Batch: <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+Shift+A</kbd> approve all green
                 </span>
               </CardDescription>
             </div>
@@ -297,7 +312,7 @@ export function ApprovalQueueEnhanced() {
   }
 
   return (
-    <>
+    <TooltipProvider>
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -331,7 +346,7 @@ export function ApprovalQueueEnhanced() {
 
               {/* Sort */}
               <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
-                <SelectTrigger className="w-32">
+                <SelectTrigger className="w-40">
                   <ArrowUpDown className="h-4 w-4 mr-2" />
                   <SelectValue />
                 </SelectTrigger>
@@ -342,13 +357,27 @@ export function ApprovalQueueEnhanced() {
                 </SelectContent>
               </Select>
 
-              {/* Batch Actions */}
-              {selectedDrafts.length > 0 && (
-                <Button onClick={handleBatchApprove} className="bg-green-600 hover:bg-green-700">
-                  <ThumbsUp className="h-4 w-4 mr-2" />
-                  Approve {selectedDrafts.length}
-                </Button>
-              )}
+              {/* Batch Approve All Green Items */}
+              {(() => {
+                const greenCount = pendingDrafts.filter((draft: DraftDocument) => draft.triage_level === 'green').length
+                return greenCount > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        onClick={handleBatchApproveAllGreen} 
+                        className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2"
+                        size="lg"
+                      >
+                        <ThumbsUp className="h-5 w-5 mr-2" />
+                        Approve all Green drafts
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+Shift+A</kbd>
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })()}
             </div>
           </div>
         </CardHeader>
@@ -366,24 +395,13 @@ export function ApprovalQueueEnhanced() {
                 <Card key={draft.id} className="transition-all duration-200 hover:shadow-md">
                   <CardContent className="p-6">
                     <div className="flex items-start space-x-4">
-                      {/* Selection checkbox */}
-                      <Checkbox
-                        checked={selectedDrafts.includes(draft.id)}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedDrafts([...selectedDrafts, draft.id])
-                          } else {
-                            setSelectedDrafts(selectedDrafts.filter(id => id !== draft.id))
-                          }
-                        }}
-                        className="mt-1"
-                      />
+
 
                       {/* Confidence Ring with Visual Icons */}
                       <div className="flex-shrink-0 flex items-center space-x-2">
                         <div className="text-lg">
-                          {draft.confidence_score >= 0.8 ? '🟢' : 
-                           draft.confidence_score >= 0.5 ? '🟡' : '🔴'}
+                          {draft.confidence_score >= 0.85 ? '🟢' : 
+                           draft.confidence_score >= 0.60 ? '🟡' : '🔴'}
                         </div>
                         <ConfidenceRing score={draft.confidence_score} />
                       </div>
@@ -392,15 +410,36 @@ export function ApprovalQueueEnhanced() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-foreground mb-2">
-                              {draft.title}
-                            </h3>
+                            <div className="mb-2">
+                              <h3 className="text-lg font-semibold text-foreground">
+                                {(() => {
+                                  // Try to get original filename from source references
+                                  const originalTitle = draft.source_references?.[0]?.title || 
+                                                      draft.source_documents?.[0]?.metadata?.fileName ||
+                                                      draft.title
+                                  return originalTitle
+                                })()}
+                              </h3>
+                              {/* Show AI-generated topic as subtitle if different from filename */}
+                              {draft.topics && draft.topics.length > 0 && (
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {draft.topics[0]}
+                                </p>
+                              )}
+                            </div>
                             
                             {/* Metadata */}
                             <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-3">
                               <div className="flex items-center">
                                 <Calendar className="h-4 w-4 mr-1" />
-                                {typeof window !== 'undefined' ? new Date(draft.created_at).toLocaleString() : 'Loading...'}
+                                {(() => {
+                                  if (typeof window === 'undefined') return 'Loading...'
+                                  // Try to get source file timestamp, fallback to draft creation
+                                  const sourceTimestamp = draft.source_documents?.[0]?.metadata?.createdAt || 
+                                                        draft.source_references?.[0]?.createdAt ||
+                                                        draft.created_at
+                                  return new Date(sourceTimestamp).toLocaleString()
+                                })()}
                               </div>
                               {draft.author && (
                                 <div className="flex items-center">
@@ -418,7 +457,7 @@ export function ApprovalQueueEnhanced() {
 
                             {/* Summary */}
                             {draft.summary && (
-                              <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                              <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
                                 {draft.summary}
                               </p>
                             )}
@@ -442,18 +481,7 @@ export function ApprovalQueueEnhanced() {
                               </div>
                             )}
 
-                            {/* AI Confidence reasoning */}
-                            {draft.confidence_reasoning && (
-                              <div className="bg-muted/50 rounded-lg p-3 mb-3">
-                                <div className="flex items-start space-x-2">
-                                  <Sparkles className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                                  <div>
-                                    <p className="text-xs font-medium text-foreground mb-1">AI Assessment</p>
-                                    <p className="text-xs text-muted-foreground">{draft.confidence_reasoning}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
+
                           </div>
 
                           {/* Triage Level */}
@@ -468,15 +496,21 @@ export function ApprovalQueueEnhanced() {
 
                         {/* Actions */}
                         <div className="flex items-center space-x-2 mt-4">
-                          <Button
-                            size="sm"
-                            onClick={() => handleApprove(draft.id)}
-                            className="bg-green-600 hover:bg-green-700 relative"
-                          >
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Approve
-                            <kbd className="ml-2 px-1 py-0.5 text-xs bg-green-700 rounded">A</kbd>
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                onClick={() => handleApprove(draft.id)}
+                                className="bg-green-600 hover:bg-green-700 relative"
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Approve
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+A</kbd>
+                            </TooltipContent>
+                          </Tooltip>
                           
                           <Button
                             variant="outline"
@@ -489,55 +523,130 @@ export function ApprovalQueueEnhanced() {
                             View Diff
                           </Button>
                           
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditingDraft(draft)
-                              setEditedContent(draft.content)
-                            }}
-                          >
-                            <Edit className="h-4 w-4 mr-1" />
-                            Edit
-                            <kbd className="ml-2 px-1 py-0.5 text-xs bg-muted rounded">E</kbd>
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingDraft(draft)
+                                  setEditedContent(draft.content)
+                                }}
+                              >
+                                <Edit className="h-4 w-4 mr-1" />
+                                Edit
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+E</kbd>
+                            </TooltipContent>
+                          </Tooltip>
                           
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleReject(draft.id)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <XCircle className="h-4 w-4 mr-1" />
-                            Reject
-                            <kbd className="ml-2 px-1 py-0.5 text-xs bg-muted rounded">R</kbd>
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleReject(draft.id)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <XCircle className="h-4 w-4 mr-1" />
+                                Reject
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+R</kbd>
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
 
-                        {/* Inline Diff View */}
+                        {/* Enhanced Diff View - Original vs AI Structured */}
                         {expandedDiff === draft.id && (
                           <div className="mt-4 p-4 bg-muted/30 rounded-lg border animate-in slide-in-from-top-2">
-                            <h4 className="font-medium mb-2 flex items-center">
+                            <h4 className="font-medium mb-4 flex items-center">
                               <GitCompare className="h-4 w-4 mr-2" />
-                              Document Content Preview
+                              Source Content vs AI Structured Draft
                             </h4>
-                            <div className="max-h-64 overflow-y-auto">
-                              <pre className="text-sm text-muted-foreground whitespace-pre-wrap font-mono">
-                                {draft.content.substring(0, 1000)}
-                                {draft.content.length > 1000 && '...'}
-                              </pre>
+                            
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                              {/* Original Source Content */}
+                              <div className="space-y-3">
+                                <h5 className="text-sm font-semibold text-orange-700 bg-orange-50 px-2 py-1 rounded flex items-center">
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  Original Source{draft.source_documents && draft.source_documents.length > 1 ? 's' : ''}
+                                </h5>
+                                <div className="max-h-80 overflow-y-auto border rounded bg-white">
+                                  {draft.source_documents && draft.source_documents.length > 0 ? (
+                                    draft.source_documents.map((source, index) => (
+                                      <div key={source.id} className="p-3 border-b last:border-b-0">
+                                        {draft.source_documents!.length > 1 && (
+                                          <div className="text-xs text-muted-foreground mb-2 font-medium">
+                                            Source {index + 1} ({source.source_type})
+                                          </div>
+                                        )}
+                                        <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">
+                                          {source.original_content || 'No original content available'}
+                                        </pre>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <div className="p-3 text-xs text-muted-foreground italic">
+                                      No source content available
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* AI Structured Draft */}
+                              <div className="space-y-3">
+                                <h5 className="text-sm font-semibold text-blue-700 bg-blue-50 px-2 py-1 rounded flex items-center">
+                                  <Sparkles className="h-3 w-3 mr-1" />
+                                  AI Structured Draft
+                                </h5>
+                                <div className="max-h-80 overflow-y-auto border rounded bg-white">
+                                  <div className="p-3">
+                                    <pre className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">
+                                      {draft.content}
+                                    </pre>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                            {draft.changes_made && draft.changes_made.length > 0 && (
-                              <div className="mt-3 pt-3 border-t">
-                                <p className="text-xs font-medium text-foreground mb-2">AI Changes Made:</p>
-                                <ul className="text-xs text-muted-foreground space-y-1">
-                                  {draft.changes_made.map((change, index) => (
-                                    <li key={index} className="flex items-start">
-                                      <span className="text-green-600 mr-2">+</span>
-                                      {change}
-                                    </li>
+
+                            {/* AI Confidence Assessment */}
+                            {draft.confidence_reasoning && (
+                              <div className="mt-4 pt-4 border-t">
+                                <h6 className="text-sm font-semibold text-purple-700 mb-3 flex items-center">
+                                  <Sparkles className="h-4 w-4 mr-2" />
+                                  AI Confidence Assessment
+                                </h6>
+                                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                                  <p className="text-sm text-purple-800 leading-relaxed">
+                                    {draft.confidence_reasoning}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Source Metadata */}
+                            {draft.source_documents && draft.source_documents.length > 0 && (
+                              <div className="mt-4 pt-4 border-t">
+                                <h6 className="text-xs font-semibold text-gray-600 mb-2">Source Details</h6>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {draft.source_documents.map((source, index) => (
+                                    <div key={source.id} className="text-xs bg-gray-50 p-2 rounded">
+                                      <div className="font-medium">Source {index + 1}</div>
+                                      <div className="text-muted-foreground">
+                                        Type: {source.source_type} | ID: {source.source_id.substring(0, 8)}...
+                                      </div>
+                                      {source.metadata?.author && (
+                                        <div className="text-muted-foreground">
+                                          Author: {source.metadata.author}
+                                        </div>
+                                      )}
+                                    </div>
                                   ))}
-                                </ul>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -584,6 +693,6 @@ export function ApprovalQueueEnhanced() {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </TooltipProvider>
   )
 }

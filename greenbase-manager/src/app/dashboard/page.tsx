@@ -150,39 +150,6 @@ export default function DashboardPage() {
               </div>
               
               <div className="flex items-center space-x-2">
-                {/* Test OAuth Button */}
-                <Button 
-                  variant="outline"
-                  onClick={async () => {
-                    try {
-                      const response = await fetch('/api/test-oauth?provider=microsoft')
-                      const result = await response.json()
-                      alert(`OAuth Test Results:\n${JSON.stringify(result, null, 2)}`)
-                    } catch (error) {
-                      console.error('Failed to test OAuth:', error)
-                    }
-                  }}
-                >
-                  Test OAuth
-                </Button>
-                
-                {/* Test Data Button */}
-                <Button 
-                  variant="outline"
-                  onClick={async () => {
-                    try {
-                      const response = await fetch('/api/test-data', { method: 'POST' })
-                      if (response.ok) {
-                        window.location.reload()
-                      }
-                    } catch (error) {
-                      console.error('Failed to create test data:', error)
-                    }
-                  }}
-                >
-                  Create Test Data
-                </Button>
-                
                 {/* AI Assistant Button - Commented out for now */}
                 {/* <Button 
                   onClick={() => setAiPanelOpen(true)}
@@ -266,44 +233,22 @@ export default function DashboardPage() {
                           </div>
                         ))}
                       </div>
+                    ) : stats.activeSources > 0 ? (
+                      <div className="text-center py-4">
+                        <div className="text-2xl font-bold text-green-600 mb-2">{stats.activeSources}</div>
+                        <p className="text-sm text-muted-foreground">Active Sources Connected</p>
+                        <Button variant="outline" size="sm" className="mt-3" asChild>
+                          <a href="/dashboard/sources">Manage Sources</a>
+                        </Button>
+                      </div>
                     ) : (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between p-3 border rounded-lg">
-                          <div className="flex items-center space-x-3">
-                            <div className="h-8 w-8 bg-blue-100 rounded flex items-center justify-center">
-                              📁
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium">Google Drive</p>
-                              <p className="text-xs text-muted-foreground">2.3k docs</p>
-                            </div>
-                          </div>
-                          <Badge className="bg-green-100 text-green-800">Active</Badge>
-                        </div>
-                        <div className="flex items-center justify-between p-3 border rounded-lg">
-                          <div className="flex items-center space-x-3">
-                            <div className="h-8 w-8 bg-purple-100 rounded flex items-center justify-center">
-                              💬
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium">Microsoft Teams</p>
-                              <p className="text-xs text-muted-foreground">847 messages</p>
-                            </div>
-                          </div>
-                          <Badge className="bg-yellow-100 text-yellow-800">Syncing</Badge>
-                        </div>
-                        <div className="flex items-center justify-between p-3 border rounded-lg">
-                          <div className="flex items-center space-x-3">
-                            <div className="h-8 w-8 bg-green-100 rounded flex items-center justify-center">
-                              📧
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium">Outlook</p>
-                              <p className="text-xs text-muted-foreground">1.2k emails</p>
-                            </div>
-                          </div>
-                          <Badge className="bg-red-100 text-red-800">Error</Badge>
-                        </div>
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Zap className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p className="font-medium mb-2">No sources connected</p>
+                        <p className="text-xs mb-4">Connect your first data source to get started</p>
+                        <Button size="sm" asChild>
+                          <a href="/dashboard/sources">Connect Source</a>
+                        </Button>
                       </div>
                     )}
                   </CardContent>

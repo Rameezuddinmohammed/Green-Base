@@ -15,6 +15,7 @@ function SignInForm() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const redirectTo = searchParams.get('redirectTo') || '/dashboard'
+  const authError = searchParams.get('error')
   // Using the shared client from lib/supabase.ts
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -23,31 +24,33 @@ function SignInForm() {
     setError("")
     
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // Use server-side sign-in API
+      const response = await fetch('/api/auth/signin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
       })
-
-      if (error) {
-        setError(error.message)
+      
+      const result = await response.json()
+      
+      if (!response.ok || !result.success) {
+        setError(result.error || 'Sign-in failed')
         return
       }
-
-      if (data.session) {
-        // Wait a moment for the session to be established
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // Refresh the page to update server-side session
-        router.refresh()
-        
-        // Force a hard redirect to ensure session is picked up
-        window.location.href = redirectTo
-      } else {
-        setError('Authentication failed - no session created')
-      }
+      
+      console.log('Server sign-in successful:', result.email)
+      
+      // Wait a moment for cookies to be set
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Redirect to destination
+      window.location.href = redirectTo
+      
     } catch (error: any) {
       console.error('Sign in error:', error)
-      setError(error.message || 'Invalid credentials')
+      setError(error.message || 'Network error')
     } finally {
       setLoading(false)
     }
@@ -86,9 +89,9 @@ function SignInForm() {
               {loading ? 'Signing In...' : 'Sign In'}
             </Button>
             
-            {error && (
+            {(error || authError) && (
               <div className="text-sm text-red-600 mt-2">
-                {error}
+                {error || authError}
               </div>
             )}
           </form>

@@ -43,8 +43,16 @@ export async function GET(request: NextRequest) {
         expiresAt: session.expires_at
       } : null,
       profile: userProfile,
-      cookies: cookieStore.getAll().map(c => ({ name: c.name, value: c.value.substring(0, 20) + '...' })),
-      error: sessionError?.message
+      cookies: cookieStore.getAll().map(c => ({ 
+        name: c.name, 
+        hasValue: !!c.value,
+        length: c.value?.length || 0
+      })),
+      error: sessionError?.message,
+      debug: {
+        cookieCount: cookieStore.getAll().length,
+        supabaseCookies: cookieStore.getAll().filter(c => c.name.includes('supabase')).length
+      }
     })
   } catch (error: any) {
     return NextResponse.json(

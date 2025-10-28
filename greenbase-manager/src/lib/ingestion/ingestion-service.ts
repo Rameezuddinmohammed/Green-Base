@@ -52,16 +52,14 @@ class IngestionService {
     }
 
     try {
-      // Group related content by similarity/topic
-      const contentGroups = await this.groupRelatedContent(sourceContent)
-
-      for (const group of contentGroups) {
+      // Process each content item individually for accurate confidence scoring
+      for (const content of sourceContent) {
         try {
-          await this.processContentGroup(group, sourceId, organizationId)
+          await this.processIndividualContent(content, sourceId, organizationId)
           result.documentsCreated++
         } catch (error) {
-          console.error('Failed to process content group:', error)
-          result.errors.push(`Failed to process group: ${error instanceof Error ? error.message : 'Unknown error'}`)
+          console.error('Failed to process content item:', error)
+          result.errors.push(`Failed to process "${content.title}": ${error instanceof Error ? error.message : 'Unknown error'}`)
         }
       }
 
@@ -164,7 +162,99 @@ class IngestionService {
   }
 
   /**
-   * Process a group of related content items into a draft document
+   * Process a single content item into a draft document
+   */
+  private async processIndividualContent(
+    content: SourceContent,
+    sourceId: string,
+    organizationId: string
+  ): Promise<void> {
+    console.log(`Processing individual content: ${content.type} - "${content.title}" (${content.content.length} chars)`)
+    
+    // Format content with metadata header
+    let formattedContent = `# ${content.title}\n\n`
+    if (content.metadata.author) {
+      formattedContent += `**Author:** ${content.metadata.author}\n`
+    }
+    if (content.metadata.createdAt) {
+      formattedContent += `**Date:** ${content.metadata.createdAt.toLocaleDateString()}\n`
+    }
+    formattedContent += '\n' + content.content
+
+    console.log(`Formatted content length: ${formattedContent.length} characters`)
+    
+    // Process through AI pipeline
+    console.log('Starting AI processing...')
+    const aiResult = await this.aiService.processContent(
+      formattedContent,
+      [{
+        sourceType: content.type === 'teams_message' ? 'teams' : 'google_drive',
+        sourceId: content.id,
+        originalContent: content.content,
+        metadata: content.metadata
+      }]
+    )
+    
+    console.log(`AI processing completed. Confidence: ${aiResult.confidence.score} (${aiResult.confidence.level})`)
+
+    // Create draft document
+    const { data: draftDoc, error: draftError } = await this.supabase
+      .from('draft_documents')
+      .insert({
+        title: content.title,
+        content: aiResult.structuredContent,
+        summary: aiResult.summary,
+        topics: aiResult.topics,
+        confidence_score: aiResult.confidence.score,
+        confidence_reasoning: aiResult.confidence.reasoning,
+        triage_level: aiResult.confidence.level,
+        source_references: [{
+          sourceType: content.type === 'teams_message' ? 'teams' : 'google_drive',
+          sourceId: content.id,
+          title: content.title,
+          author: content.metadata.author,
+          createdAt: content.metadata.createdAt,
+          sourceUrl: content.metadata.sourceUrl
+        }],
+        pii_entities_found: aiResult.piiEntities.length,
+        processing_metadata: {
+          sourceId,
+          itemCount: 1,
+          processingTime: aiResult.processingTime,
+          tokensUsed: aiResult.tokensUsed
+        },
+        organization_id: organizationId,
+        status: 'pending'
+      })
+      .select()
+      .single()
+
+    if (draftError) {
+      throw new Error(`Failed to create draft document: ${draftError.message}`)
+    }
+
+    // Create source document record
+    const { error: sourceError } = await this.supabase
+      .from('source_documents')
+      .insert({
+        draft_document_id: draftDoc.id,
+        source_type: content.type === 'teams_message' ? 'teams' : 'google_drive',
+        source_id: content.id,
+        original_content: content.content,
+        redacted_content: aiResult.redactedContent,
+        metadata: content.metadata
+      })
+
+    if (sourceError) {
+      console.error('Failed to create source document:', sourceError)
+      // Don't throw here as the main document was created successfully
+    }
+
+    console.log(`Created draft document "${content.title}" with confidence ${aiResult.confidence.level} (${Math.round(aiResult.confidence.score * 100)}%)`)
+  }
+
+  /**
+   * Process a group of related content items into a draft document (legacy grouping method)
    */
   private async processContentGroup(
     contentGroup: SourceContent[],
@@ -297,6 +387,49 @@ class IngestionService {
       return `Team Discussion - ${new Date().toLocaleDateString()}`
     } else {
       return `Document Collection - ${new Date().toLocaleDateString()}`
+    }
+  }
+
+  /**
+   * Process content with grouping enabled (alternative processing mode)
+   */
+  async processSourceContentWithGrouping(
+    sourceContent: SourceContent[],
+    sourceId: string,
+    organizationId: string
+  ): Promise<IngestionResult> {
+    await this.initialize()
+    
+    const startTime = Date.now()
+    const result: IngestionResult = {
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      errors: [],
+      processingTime: 0
+    }
+
+    try {
+      // Group related content by similarity/topic
+      const contentGroups = await this.groupRelatedContent(sourceContent)
+
+      for (const group of contentGroups) {
+        try {
+          await this.processContentGroup(group, sourceId, organizationId)
+          result.documentsCreated++
+        } catch (error) {
+          console.error('Failed to process content group:', error)
+          result.errors.push(`Failed to process group: ${error instanceof Error ? error.message : 'Unknown error'}`)
+        }
+      }
+
+      result.processingTime = Date.now() - startTime
+      return result
+
+    } catch (error) {
+      console.error('Ingestion service error:', error)
+      result.errors.push(`Ingestion failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      result.processingTime = Date.now() - startTime
+      return result
     }
   }
 

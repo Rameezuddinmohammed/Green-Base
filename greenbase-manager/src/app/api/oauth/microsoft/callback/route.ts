@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getOAuthService } from '../../../../../lib/oauth/oauth-service'
-import { getDemoStorage } from '../../../../../lib/demo-storage'
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,32 +21,23 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('Processing Microsoft OAuth callback for user:', state)
-    
+
     try {
+      // Use the OAuth service to handle the complete callback flow
+      const { getOAuthService } = await import('../../../../../lib/oauth/oauth-service')
       const oauthService = getOAuthService()
       const sourceName = `Microsoft Teams - ${new Date().toLocaleDateString()}`
       
+      console.log('Processing OAuth callback with service...')
       const connectedSource = await oauthService.handleCallback('microsoft', code, state, sourceName)
-      console.log('Microsoft OAuth callback processed successfully:', connectedSource.id)
+      
+      console.log('OAuth callback processed successfully:', connectedSource.id)
+
     } catch (error) {
       console.error('Microsoft OAuth callback processing failed:', error)
-      
-      // Fallback: Store in demo storage
-      console.log('Using demo storage fallback for Microsoft OAuth callback')
-      const demoStorage = getDemoStorage()
-      const demoSource = {
-        id: `demo-teams-${Date.now()}`,
-        type: 'teams' as const,
-        name: `Microsoft Teams - ${new Date().toLocaleDateString()}`,
-        userId: state,
-        accessToken: 'demo-access-token',
-        refreshToken: 'demo-refresh-token',
-        isActive: true,
-        lastSyncAt: new Date()
-      }
-      
-      demoStorage.addSource(demoSource)
-      console.log('Demo source added successfully:', demoSource.id)
+      return NextResponse.redirect(
+        new URL(`/dashboard/sources?error=${encodeURIComponent(`Failed to save Microsoft Teams connection: ${error instanceof Error ? error.message : 'Unknown error'}`)}`, request.url)
+      )
     }
 
     return NextResponse.redirect(

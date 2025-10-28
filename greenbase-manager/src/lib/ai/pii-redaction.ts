@@ -68,13 +68,74 @@ class PIIRedactionService {
     } = options
 
     try {
-      // TODO: Implement Azure AI Language Text Analytics API properly
-      // For MVP, we'll use the fallback regex-based redaction
-      // Azure AI Language Text Analytics API requires specific configuration and API version
-      console.warn('Using fallback PII redaction - Azure AI Language service not configured')
-      return this.fallbackRedaction(text, maskingCharacter)
+      // Use Azure AI Language Text Analytics for PII detection
+      const actions = [
+        {
+          kind: 'PiiEntityRecognition' as const,
+          modelVersion: 'latest',
+          piiCategories: categories,
+          domainFilter: 'phi' // Protected Health Information domain
+        }
+      ]
+
+      const poller = await this.client.beginAnalyzeBatch(
+        actions,
+        [text],
+        'en',
+        {
+          updateIntervalInMs: 1000
+        }
+      )
+
+      const results = await poller.pollUntilDone()
+      
+      // Extract PII entities from results
+      const detectedEntities: PIIEntity[] = []
+      
+      for await (const actionResult of results) {
+        if (actionResult.kind === 'PiiEntityRecognition' && !actionResult.error) {
+          for (const doc of actionResult.results) {
+            if (!doc.error) {
+              for (const entity of doc.entities) {
+                if (entity.confidenceScore >= confidenceThreshold) {
+                  detectedEntities.push({
+                    text: entity.text,
+                    category: entity.category,
+                    subcategory: entity.subCategory,
+                    confidenceScore: entity.confidenceScore,
+                    offset: entity.offset,
+                    length: entity.length
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Sort by offset descending for proper replacement
+      detectedEntities.sort((a, b) => b.offset - a.offset)
+
+      // Replace detected PII with masking characters
+      let redactedText = text
+      for (const entity of detectedEntities) {
+        const replacement = maskingCharacter.repeat(entity.length)
+        redactedText = 
+          redactedText.substring(0, entity.offset) +
+          replacement +
+          redactedText.substring(entity.offset + entity.length)
+      }
+
+      console.log(`✓ Azure AI PII Detection: Found ${detectedEntities.length} entities`)
+
+      return {
+        redactedText,
+        entities: detectedEntities,
+        originalLength: text.length,
+        redactedLength: redactedText.length
+      }
     } catch (error) {
-      console.error('PII redaction error:', error)
+      console.error('Azure AI PII redaction error, falling back to regex:', error)
       
       // Fallback: Conservative redaction using regex patterns
       return this.fallbackRedaction(text, maskingCharacter)

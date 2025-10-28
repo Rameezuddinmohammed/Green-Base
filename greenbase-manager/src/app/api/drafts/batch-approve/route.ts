@@ -31,20 +31,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden - Manager access required' }, { status: 403 })
     }
 
-    // Get all draft documents
+    // Get all draft documents - only allow batch approval of green (high confidence) items
     const { data: draftDocs, error: fetchError } = await supabaseAdmin
       .from('draft_documents')
       .select('*')
       .in('id', documentIds)
       .eq('organization_id', user.organization_id)
       .eq('status', 'pending')
+      .eq('triage_level', 'green') // Only allow batch approval of green items
 
     if (fetchError) {
       throw fetchError
     }
 
     if (!draftDocs || draftDocs.length === 0) {
-      return NextResponse.json({ error: 'No valid draft documents found' }, { status: 404 })
+      return NextResponse.json({ 
+        error: 'No valid green (high confidence) draft documents found for batch approval. Only green items can be batch approved.' 
+      }, { status: 404 })
+    }
+
+    // Check if any requested documents were filtered out due to not being green
+    const foundIds = draftDocs.map(doc => doc.id)
+    const filteredOutIds = documentIds.filter(id => !foundIds.includes(id))
+    
+    if (filteredOutIds.length > 0) {
+      console.log(`Filtered out ${filteredOutIds.length} non-green documents from batch approval`)
     }
 
     const approvedDocuments = []

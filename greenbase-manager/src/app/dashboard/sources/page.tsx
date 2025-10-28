@@ -65,6 +65,12 @@ export default function SourcesPage() {
   const [driveItems, setDriveItems] = useState<DriveItem[]>([])
   const [selectedChannels, setSelectedChannels] = useState<string[]>([])
   const [selectedFolders, setSelectedFolders] = useState<string[]>([])
+  const [syncingSource, setSyncingSource] = useState<string | null>(null)
+  const [configuringSourceId, setConfiguringSourceId] = useState<string | null>(null)
+  const [notification, setNotification] = useState<{
+    message: string
+    type: 'success' | 'error' | 'info'
+  } | null>(null)
 
   useEffect(() => {
     loadSources()
@@ -89,17 +95,7 @@ export default function SourcesPage() {
     try {
       console.log(`Initiating ${provider} OAuth flow...`)
       
-      // Test OAuth configuration first
-      const testResponse = await fetch(`/api/test-oauth?provider=${provider}`)
-      const testResult = await testResponse.json()
-      
-      if (!testResponse.ok || testResult.authUrlGeneration.includes('✗')) {
-        throw new Error(`OAuth configuration issue: ${JSON.stringify(testResult)}`)
-      }
-      
-      console.log('OAuth test passed, redirecting to auth...')
-      
-      // Redirect to OAuth flow
+      // Redirect directly to OAuth flow
       window.location.href = `/api/oauth/${provider}/auth`
     } catch (error) {
       console.error('Failed to connect source:', error)
@@ -123,32 +119,33 @@ export default function SourcesPage() {
   }
 
   const handleConfigureSource = async (source: ConnectedSource) => {
-    setConfiguringSource(source)
+    setConfiguringSourceId(source.id)
     
-    if (source.type === 'teams') {
-      // Load Teams channels
-      try {
+    try {
+      if (source.type === 'teams') {
+        // Load Teams channels
         const response = await fetch(`/api/sources/${source.id}/channels`)
         if (response.ok) {
           const data = await response.json()
           setTeamsChannels(data.channels || [])
           setSelectedChannels(source.selectedChannels || [])
         }
-      } catch (error) {
-        console.error('Failed to load Teams channels:', error)
-      }
-    } else if (source.type === 'google_drive') {
-      // Load Drive folders
-      try {
+      } else if (source.type === 'google_drive') {
+        // Load Drive folders
         const response = await fetch(`/api/sources/${source.id}/folders`)
         if (response.ok) {
           const data = await response.json()
           setDriveItems(data.items || [])
           setSelectedFolders(source.selectedFolders || [])
         }
-      } catch (error) {
-        console.error('Failed to load Drive folders:', error)
       }
+      
+      // Only open dialog after data is loaded
+      setConfiguringSource(source)
+    } catch (error) {
+      console.error('Failed to load source configuration:', error)
+    } finally {
+      setConfiguringSourceId(null)
     }
   }
 
@@ -175,25 +172,77 @@ export default function SourcesPage() {
   }
 
   const handleSyncSource = async (sourceId: string) => {
+    // Prevent multiple simultaneous syncs
+    if (syncingSource === sourceId) {
+      return
+    }
+
+    console.log(`🔄 handleSyncSource called with sourceId: ${sourceId}`)
+    console.log(`📋 Available sources:`, sources.map(s => ({ id: s.id, name: s.name, active: s.is_active })))
+
+    setSyncingSource(sourceId)
+    
     try {
-      console.log(`Starting sync for source ${sourceId}...`)
+      console.log(`🚀 Starting sync for source ${sourceId}...`)
       
       const response = await fetch(`/api/sources/${sourceId}/sync`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ syncType: 'manual' })
       })
       
-      const result = await response.json()
+      console.log(`📡 Sync API response status: ${response.status}`)
       
-      if (response.ok) {
-        console.log('Sync completed:', result)
-        alert(`Sync completed! ${result.message || 'Documents processed successfully'}`)
+      let result
+      try {
+        result = await response.json()
+        console.log(`📋 Sync API response:`, result)
+      } catch (parseError) {
+        console.error(`❌ Failed to parse sync response as JSON:`, parseError)
+        throw new Error(`Invalid JSON response from sync API (status: ${response.status})`)
+      }
+      
+      if (response.ok && result.success) {
+        console.log('✅ Sync completed successfully:', result)
+        
+        // Show success notification
+        setNotification({
+          message: result.message || 'Sync completed successfully!',
+          type: 'success'
+        })
+        
+        // Show success for a moment, then clear
+        setTimeout(() => {
+          setSyncingSource(null)
+          setNotification(null)
+        }, 3000)
+        
+        // Reload sources to update last sync time
         await loadSources()
       } else {
-        throw new Error(result.error || 'Sync failed')
+        console.error(`❌ Sync failed:`, result)
+        throw new Error(result.error || result.message || 'Sync failed')
       }
     } catch (error) {
-      console.error('Failed to sync source:', error)
-      alert(`Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('❌ Failed to sync source:', error)
+      console.error(`📊 Error details:`, {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      })
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      
+      setNotification({
+        message: `Sync failed: ${errorMessage}`,
+        type: 'error'
+      })
+      
+      // Clear error after showing it
+      setTimeout(() => {
+        setSyncingSource(null)
+        setNotification(null)
+      }, 4000)
     }
   }
 
@@ -253,6 +302,24 @@ export default function SourcesPage() {
 
   return (
     <DashboardLayout>
+      {/* Notification Toast */}
+      {notification && (
+        <div className={`fixed bottom-4 right-4 z-[9999] p-4 rounded-lg shadow-xl border max-w-md animate-in slide-in-from-right-2 ${
+          notification.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+          notification.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+          'bg-blue-50 border-blue-200 text-blue-800'
+        }`}>
+          <div className="flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${
+              notification.type === 'success' ? 'bg-green-500' :
+              notification.type === 'error' ? 'bg-red-500' :
+              'bg-blue-500'
+            }`}></div>
+            <span className="font-medium">{notification.message}</span>
+          </div>
+        </div>
+      )}
+      
       <div className="container py-8 px-4">
         <div className="space-y-8">
           {/* Header */}
@@ -265,30 +332,6 @@ export default function SourcesPage() {
             </div>
             
             <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  try {
-                    const response = await fetch('/api/demo-source', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ provider: 'google' })
-                    })
-                    const result = await response.json()
-                    if (response.ok) {
-                      alert('Demo Google Drive source created!')
-                      await loadSources()
-                    } else {
-                      alert(`Failed: ${result.error}`)
-                    }
-                  } catch (error) {
-                    alert('Failed to create demo source')
-                  }
-                }}
-              >
-                Add Demo Google Drive
-              </Button>
-              
               <Dialog>
                 <DialogTrigger asChild>
                   <Button className="bg-primary hover:bg-primary/90">
@@ -473,18 +516,20 @@ export default function SourcesPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => handleConfigureSource(source)}
+                          disabled={configuringSourceId === source.id}
                         >
-                          <Settings className="h-4 w-4 mr-1" />
-                          Configure
+                          <Settings className={`h-4 w-4 mr-1 ${configuringSourceId === source.id ? 'animate-spin' : ''}`} />
+                          {configuringSourceId === source.id ? 'Loading...' : 'Configure'}
                         </Button>
                         
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => handleSyncSource(source.id)}
+                          disabled={syncingSource === source.id}
                         >
-                          <RefreshCw className="h-4 w-4 mr-1" />
-                          Sync
+                          <RefreshCw className={`h-4 w-4 mr-1 ${syncingSource === source.id ? 'animate-spin' : ''}`} />
+                          {syncingSource === source.id ? 'Syncing' : 'Sync'}
                         </Button>
                         
                         <AlertDialog>
@@ -514,6 +559,8 @@ export default function SourcesPage() {
                         </AlertDialog>
                       </div>
                     </div>
+                    
+
                   </CardContent>
                 </Card>
               ))}
@@ -523,7 +570,10 @@ export default function SourcesPage() {
       </div>
 
       {/* Configuration Dialog */}
-      <Dialog open={!!configuringSource} onOpenChange={() => setConfiguringSource(null)}>
+      <Dialog open={!!configuringSource} onOpenChange={() => {
+        setConfiguringSource(null)
+        setConfiguringSourceId(null)
+      }}>
         <DialogContent className="max-w-2xl max-h-[80vh]">
           <DialogHeader>
             <DialogTitle>
@@ -597,7 +647,10 @@ export default function SourcesPage() {
           </div>
           
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="outline" onClick={() => setConfiguringSource(null)}>
+            <Button variant="outline" onClick={() => {
+              setConfiguringSource(null)
+              setConfiguringSourceId(null)
+            }}>
               Cancel
             </Button>
             <Button onClick={handleSaveConfiguration}>
