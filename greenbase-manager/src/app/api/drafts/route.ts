@@ -22,11 +22,11 @@ export async function GET(request: NextRequest) {
         },
       }
     )
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
     
-    if (!session?.user?.email) {
+    if (!authUser?.email) {
       // For testing without authentication, return empty drafts
-      console.log('No session found, returning empty drafts for demo')
+      console.log('No authenticated user found, returning empty drafts for demo')
       return NextResponse.json({ drafts: [] })
     }
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const { data: user } = await supabaseAdmin
       .from('users')
       .select('id, organization_id, role')
-      .eq('email', session.user.email)
+      .eq('email', authUser.email)
       .single()
 
     if (!user || user.role !== 'manager') {

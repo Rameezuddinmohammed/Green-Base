@@ -22,25 +22,25 @@ export async function GET(request: NextRequest) {
       }
     )
 
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     
     let userProfile = null
-    if (session?.user) {
+    if (user) {
       const { data: profile } = await supabase
         .from('users')
         .select('*')
-        .eq('id', session.user.id)
+        .eq('id', user.id)
         .single()
       
       userProfile = profile
     }
 
     return NextResponse.json({
-      authenticated: !!session,
-      session: session ? {
-        userId: session.user.id,
-        email: session.user.email,
-        expiresAt: session.expires_at
+      authenticated: !!user,
+      session: user ? {
+        userId: user.id,
+        email: user.email,
+        expiresAt: null // getUser doesn't provide session expiry
       } : null,
       profile: userProfile,
       cookies: cookieStore.getAll().map(c => ({ 
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
         hasValue: !!c.value,
         length: c.value?.length || 0
       })),
-      error: sessionError?.message,
+      error: userError?.message,
       debug: {
         cookieCount: cookieStore.getAll().length,
         supabaseCookies: cookieStore.getAll().filter(c => c.name.includes('supabase')).length

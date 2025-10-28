@@ -22,11 +22,11 @@ export async function GET(request: NextRequest) {
         },
       }
     )
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
     
-    if (!session?.user?.email) {
+    if (!user?.email) {
       // Return empty sources for unauthenticated users
-      console.log('No session found, returning empty sources')
+      console.log('No authenticated user found, returning empty sources')
       return NextResponse.json({ sources: [] })
     }
 
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     const { data: sources, error } = await supabaseAdmin
       .from('connected_sources')
       .select('id, type, name, user_id, selected_channels, selected_folders, selected_team_channels, last_sync_at, is_active, created_at')
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .eq('is_active', true)
       .order('created_at', { ascending: false })
 
@@ -89,9 +89,9 @@ export async function DELETE(request: NextRequest) {
         },
       }
     )
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
     
-    if (!session?.user?.email) {
+    if (!user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -108,7 +108,7 @@ export async function DELETE(request: NextRequest) {
       .from('connected_sources')
       .update({ is_active: false })
       .eq('id', sourceId)
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
 
     if (error) {
       console.error('Database error disconnecting source:', error)

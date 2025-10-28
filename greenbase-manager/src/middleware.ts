@@ -27,14 +27,15 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  // Refresh session if expired - required for Server Components
-  const { data: { session } } = await supabase.auth.getSession()
+  // Get authenticated user - more secure than getSession()
+  const { data: { user }, error } = await supabase.auth.getUser()
   
   // Debug logging
   console.log('Middleware - Path:', req.nextUrl.pathname)
-  console.log('Middleware - Session exists:', !!session)
-  if (session) {
-    console.log('Middleware - User ID:', session.user.id)
+  console.log('Middleware - User exists:', !!user)
+  console.log('Middleware - Auth error:', error?.message || 'none')
+  if (user) {
+    console.log('Middleware - User ID:', user.id)
   }
 
 
@@ -56,7 +57,7 @@ export async function middleware(req: NextRequest) {
   )
 
   // Only redirect authenticated users away from auth pages
-  if (session && isAuthRoute) {
+  if (user && isAuthRoute) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
