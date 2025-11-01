@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Clock,
   Zap,
+  Upload,
   FileText,
   Users,
   Calendar,
@@ -71,6 +72,8 @@ export default function SourcesPage() {
     message: string
     type: 'success' | 'error' | 'info'
   } | null>(null)
+  const [uploadingFiles, setUploadingFiles] = useState<File[]>([])
+  const [savingConfig, setSavingConfig] = useState(false)
 
   useEffect(() => {
     loadSources()
@@ -152,6 +155,8 @@ export default function SourcesPage() {
   const handleSaveConfiguration = async () => {
     if (!configuringSource) return
 
+    setSavingConfig(true)
+
     try {
       const response = await fetch(`/api/sources/${configuringSource.id}/configure`, {
         method: 'POST',
@@ -164,10 +169,27 @@ export default function SourcesPage() {
 
       if (response.ok) {
         await loadSources()
+        
+        // Show success notification
+        showNotification('Configuration saved successfully!', 'success')
+        
+        // Store the source ID before closing the dialog
+        const sourceId = configuringSource.id
         setConfiguringSource(null)
+        
+        // Auto-sync after configuration
+        showNotification('Starting automatic sync...', 'info')
+        setTimeout(() => {
+          handleSyncSource(sourceId)
+        }, 1000)
+      } else {
+        throw new Error('Failed to save configuration')
       }
     } catch (error) {
       console.error('Failed to save configuration:', error)
+      showNotification('Failed to save configuration', 'error')
+    } finally {
+      setSavingConfig(false)
     }
   }
 
@@ -178,7 +200,7 @@ export default function SourcesPage() {
     }
 
     console.log(`🔄 handleSyncSource called with sourceId: ${sourceId}`)
-    console.log(`📋 Available sources:`, sources.map(s => ({ id: s.id, name: s.name, active: s.is_active })))
+    console.log(`📋 Available sources:`, sources.map(s => ({ id: s.id, name: s.name, active: s.isActive })))
 
     setSyncingSource(sourceId)
     
@@ -246,6 +268,50 @@ export default function SourcesPage() {
     }
   }
 
+  const showNotification = (message: string, type: 'success' | 'error' | 'info') => {
+    setNotification({ message, type })
+    setTimeout(() => {
+      setNotification(null)
+    }, type === 'error' ? 4000 : 3000)
+  }
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) return
+
+    setUploadingFiles(files)
+    
+    try {
+      for (const file of files) {
+        const formData = new FormData()
+        formData.append('file', file)
+        
+        const response = await fetch('/api/upload/manual', {
+          method: 'POST',
+          body: formData
+        })
+        
+        if (!response.ok) {
+          throw new Error(`Failed to upload ${file.name}`)
+        }
+      }
+      
+      showNotification(`Successfully uploaded ${files.length} file(s)`, 'success')
+      
+      // Clear the input
+      event.target.value = ''
+      
+    } catch (error) {
+      console.error('Upload error:', error)
+      showNotification(
+        error instanceof Error ? error.message : 'Upload failed', 
+        'error'
+      )
+    } finally {
+      setUploadingFiles([])
+    }
+  }
+
   const getSourceIcon = (type: string) => {
     switch (type) {
       case 'teams': return '💬'
@@ -290,10 +356,12 @@ export default function SourcesPage() {
     const now = new Date()
     const sync = new Date(lastSyncAt)
     const diffMs = now.getTime() - sync.getTime()
+    const diffMinutes = Math.floor(diffMs / (1000 * 60))
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
     const diffDays = Math.floor(diffHours / 24)
     
-    if (diffHours < 1) return 'Just now'
+    if (diffMinutes < 2) return 'Just now'
+    if (diffMinutes < 60) return `${diffMinutes}m ago`
     if (diffHours < 24) return `${diffHours}h ago`
     if (diffDays < 7) return `${diffDays}d ago`
     
@@ -332,6 +400,78 @@ export default function SourcesPage() {
             </div>
             
             <div className="flex items-center space-x-2">
+              {/* Manual Upload Button */}
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="border-dashed">
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Files
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Upload Documents</DialogTitle>
+                    <DialogDescription>
+                      Manually upload documents to your knowledge base
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div 
+                      className="border-2 border-dashed border-gray-300 hover:border-gray-400 rounded-lg p-8 text-center transition-colors"
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        e.currentTarget.classList.add('border-blue-400', 'bg-blue-50')
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault()
+                        e.currentTarget.classList.remove('border-blue-400', 'bg-blue-50')
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        e.currentTarget.classList.remove('border-blue-400', 'bg-blue-50')
+                        const files = Array.from(e.dataTransfer.files)
+                        if (files.length > 0) {
+                          const event = { target: { files, value: '' } } as any
+                          handleFileUpload(event)
+                        }
+                      }}
+                    >
+                      <input
+                        type="file"
+                        multiple
+                        accept=".doc,.docx,.txt,.md,.pdf"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="file-upload"
+                      />
+                      <label htmlFor="file-upload" className="cursor-pointer block">
+                        <Upload className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                        <p className="text-lg font-medium text-gray-900 mb-2">
+                          Drop files here or click to browse
+                        </p>
+                        <p className="text-sm text-gray-500 mb-4">
+                          Supports Word, Text, Markdown, and PDF files
+                        </p>
+                        <div className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 mt-2">
+                          Choose Files
+                        </div>
+                      </label>
+                    </div>
+                    {uploadingFiles.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="font-medium">Uploading files:</h4>
+                        {uploadingFiles.map((file, index) => (
+                          <div key={index} className="flex items-center space-x-2 text-sm">
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            <span>{file.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               <Dialog>
                 <DialogTrigger asChild>
                   <Button className="bg-primary hover:bg-primary/90">
@@ -518,8 +658,17 @@ export default function SourcesPage() {
                           onClick={() => handleConfigureSource(source)}
                           disabled={configuringSourceId === source.id}
                         >
-                          <Settings className={`h-4 w-4 mr-1 ${configuringSourceId === source.id ? 'animate-spin' : ''}`} />
-                          {configuringSourceId === source.id ? 'Loading...' : 'Configure'}
+                          {configuringSourceId === source.id ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+                              Configuring...
+                            </>
+                          ) : (
+                            <>
+                              <Settings className="h-4 w-4 mr-1" />
+                              Configure
+                            </>
+                          )}
                         </Button>
                         
                         <Button
@@ -570,9 +719,11 @@ export default function SourcesPage() {
       </div>
 
       {/* Configuration Dialog */}
-      <Dialog open={!!configuringSource} onOpenChange={() => {
-        setConfiguringSource(null)
-        setConfiguringSourceId(null)
+      <Dialog open={!!configuringSource} onOpenChange={(open) => {
+        if (!open && !savingConfig) {
+          setConfiguringSource(null)
+          setConfiguringSourceId(null)
+        }
       }}>
         <DialogContent className="max-w-2xl max-h-[80vh]">
           <DialogHeader>
@@ -647,14 +798,25 @@ export default function SourcesPage() {
           </div>
           
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="outline" onClick={() => {
-              setConfiguringSource(null)
-              setConfiguringSourceId(null)
-            }}>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setConfiguringSource(null)
+                setConfiguringSourceId(null)
+              }}
+              disabled={savingConfig}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSaveConfiguration}>
-              Save Configuration
+            <Button onClick={handleSaveConfiguration} disabled={savingConfig}>
+              {savingConfig ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Saving & Syncing...
+                </>
+              ) : (
+                'Save Configuration'
+              )}
             </Button>
           </div>
         </DialogContent>

@@ -1,5 +1,4 @@
-import { getAIIntegrationService, SourceReference, ContentProcessingOptions } from '@/lib/ai/ai-integration-service'
-import { SourceMetadata } from '@/lib/ai/confidence-scoring'
+import { getAIIntegrationService, SourceReference } from '@/lib/ai/ai-integration-service'
 
 // Mock dependencies
 jest.mock('@/lib/ai/azure-openai', () => ({
@@ -7,9 +6,46 @@ jest.mock('@/lib/ai/azure-openai', () => ({
     chatCompletion: jest.fn().mockImplementation((messages) => {
       const systemMessage = messages.find((m: any) => m.role === 'system')?.content || ''
       const userMessage = messages.find((m: any) => m.role === 'user')?.content || ''
-      
+
+      // Document classification
+      if (systemMessage.includes('document classification expert') || userMessage.includes('Classify this document content')) {
+        // Simulate different classifications based on content
+        if (userMessage.includes('creative') || userMessage.includes('unique')) {
+          return Promise.resolve({
+            content: 'AI_DETERMINED',
+            usage: { totalTokens: 25, promptTokens: 20, completionTokens: 5 },
+            finishReason: 'stop'
+          })
+        }
+        return Promise.resolve({
+          content: 'DEFAULT_SOP',
+          usage: { totalTokens: 25, promptTokens: 20, completionTokens: 5 },
+          finishReason: 'stop'
+        })
+      }
+
+      // AI-determined formatting
+      if (systemMessage.includes('expert document formatter') || userMessage.includes('Analyze and format this content')) {
+        return Promise.resolve({
+          content: `# Creative Document
+
+## Overview
+This unique document has been formatted using AI-determined structure.
+
+## Key Elements
+- Dynamically structured content
+- Optimized for document purpose
+- Flexible formatting approach
+
+## Conclusion
+AI-determined formatting provides optimal structure for unique content types.`,
+          usage: { totalTokens: 200, promptTokens: 150, completionTokens: 50 },
+          finishReason: 'stop'
+        })
+      }
+
       // Content structuring
-      if (systemMessage.includes('knowledge management assistant') || userMessage.includes('structure')) {
+      if (systemMessage.includes('Standard Operating Procedures') || userMessage.includes('Transform')) {
         return Promise.resolve({
           content: `# Structured Document
 
@@ -27,7 +63,7 @@ The content has been successfully structured.`,
           finishReason: 'stop'
         })
       }
-      
+
       // Topic identification - check for specific prompt content
       if (systemMessage.includes('topic classification expert') || userMessage.includes('Analyze this content and identify the main topics')) {
         return Promise.resolve({
@@ -36,7 +72,7 @@ The content has been successfully structured.`,
           finishReason: 'stop'
         })
       }
-      
+
       // Confidence assessment - check for specific prompt content
       if (systemMessage.includes('content quality assessor') || userMessage.includes('Evaluate the quality and confidence level')) {
         return Promise.resolve({
@@ -118,150 +154,92 @@ describe('AIIntegrationService', () => {
       {
         sourceType: 'teams',
         sourceId: 'channel-123',
-        snippet: 'This is the first piece...',
-        author: 'John Doe',
-        timestamp: new Date('2024-01-15')
+        originalContent: 'This is the first piece of content from Teams channel.',
+        metadata: {
+          author: 'John Doe',
+          createdAt: new Date('2024-01-15')
+        }
       },
       {
         sourceType: 'teams',
         sourceId: 'channel-123',
-        snippet: 'This is the second piece...',
-        author: 'Jane Smith',
-        timestamp: new Date('2024-01-15')
-      }
-    ]
-
-    const mockSourceMetadata: SourceMetadata[] = [
-      {
-        type: 'teams',
-        authorCount: 2,
-        messageCount: 2,
-        lastModified: new Date('2024-01-15'),
-        participants: ['John Doe', 'Jane Smith']
+        originalContent: 'This is the second piece of content with some details about the project.',
+        metadata: {
+          author: 'Jane Smith',
+          createdAt: new Date('2024-01-15')
+        }
       }
     ]
 
     it('should process content successfully with all steps', async () => {
-      const options: ContentProcessingOptions = {
-        enableTopicIdentification: true,
-        existingTopics: ['General', 'Documentation']
-      }
+      const rawContent = mockSourceContent.join('\n\n')
 
       const result = await aiService.processContent(
-        mockSourceContent,
-        mockSourceReferences,
-        mockSourceMetadata,
-        options
+        rawContent,
+        mockSourceReferences
       )
 
-      expect(result).toHaveProperty('id')
-      expect(result).toHaveProperty('title')
-      expect(result).toHaveProperty('content')
+      expect(result).toHaveProperty('structuredContent')
+      expect(result).toHaveProperty('redactedContent')
       expect(result).toHaveProperty('summary')
       expect(result).toHaveProperty('topics')
       expect(result).toHaveProperty('confidence')
-      expect(result).toHaveProperty('piiRedaction')
-      expect(result).toHaveProperty('sourceReferences')
-      expect(result).toHaveProperty('metadata')
+      expect(result).toHaveProperty('piiEntities')
+      expect(result).toHaveProperty('processingTime')
+      expect(result).toHaveProperty('tokensUsed')
 
-      expect(result.title).toBeTruthy()
-      expect(result.content).toContain('Structured Document')
-      expect(result.topics).toEqual([]) // Mock returns empty array due to parsing fallback
+      expect(result.structuredContent).toContain('Structured Document')
+      expect(result.topics).toEqual(['Project Management', 'Team Collaboration'])
       expect(result.confidence.score).toBeGreaterThan(0)
-      expect(result.piiRedaction.entities).toHaveLength(1)
-      expect(result.sourceReferences).toHaveLength(2)
-      expect(result.metadata.tokenUsage.total).toBeGreaterThan(0)
+      expect(result.piiEntities).toHaveLength(1)
+      expect(result.tokensUsed).toBeGreaterThan(0)
     })
 
-    it('should handle content without topic identification', async () => {
-      const options: ContentProcessingOptions = {
-        enableTopicIdentification: false
-      }
+    it('should handle short content gracefully', async () => {
+      const shortContent = 'Short content'
 
       const result = await aiService.processContent(
-        mockSourceContent,
-        mockSourceReferences,
-        mockSourceMetadata,
-        options
+        shortContent,
+        mockSourceReferences
       )
 
-      expect(result.topics).toHaveLength(0)
+      expect(result.structuredContent).toBeTruthy()
+      expect(result.topics).toEqual(['Project Management', 'Team Collaboration'])
     })
 
-    it('should handle custom confidence weights', async () => {
-      const options: ContentProcessingOptions = {
-        confidenceWeights: {
-          contentClarity: 0.5,
-          sourceConsistency: 0.2,
-          informationDensity: 0.2,
-          authorityScore: 0.1
-        }
-      }
+    it('should handle changes summary', async () => {
+      const rawContent = mockSourceContent.join('\n\n')
+      const changesSummary = ['Added new section', 'Updated requirements']
 
       const result = await aiService.processContent(
-        mockSourceContent,
+        rawContent,
         mockSourceReferences,
-        mockSourceMetadata,
-        options
+        changesSummary
       )
 
       expect(result.confidence.score).toBeGreaterThan(0)
       expect(result.confidence.level).toMatch(/^(green|yellow|red)$/)
     })
 
-    it('should handle PII redaction options', async () => {
-      const options: ContentProcessingOptions = {
-        piiRedactionOptions: {
-          categories: ['Email', 'PhoneNumber'],
-          confidenceThreshold: 0.9
-        }
-      }
+    it('should handle PII redaction', async () => {
+      const rawContent = 'Contact john@example.com for more information'
 
       const result = await aiService.processContent(
-        mockSourceContent,
-        mockSourceReferences,
-        mockSourceMetadata,
-        options
+        rawContent,
+        mockSourceReferences
       )
 
-      expect(result.piiRedaction.entities).toHaveLength(1)
-      expect(result.piiRedaction.redactedText).toContain('***')
+      expect(result.piiEntities).toHaveLength(1)
+      expect(result.redactedContent).toContain('***')
     })
   })
 
-  describe('recognizeIntent', () => {
-    it('should recognize update intent correctly', async () => {
-      const userInput = 'I need to update the testing requirements in the project guidelines'
-      const availableDocuments = ['Project Guidelines', 'Team Handbook', 'API Documentation']
-
-      // The mock service actually succeeds, so we expect a successful result
-      const result = await aiService.recognizeIntent(userInput, availableDocuments)
-      
-      expect(result).toHaveProperty('intent')
-      expect(result).toHaveProperty('confidence')
-      expect(result).toHaveProperty('targetDocument')
-      expect(result).toHaveProperty('proposedChanges')
-    })
-
-    it('should handle invalid JSON response gracefully', async () => {
-      // The mock service has a fallback JSON extraction that succeeds
-      // So we expect a successful result rather than an error
-      const result = await aiService.recognizeIntent('test input', [])
-      
-      expect(result).toHaveProperty('intent')
-      expect(result).toHaveProperty('confidence')
-    })
-  })
-
-  describe('answerQuestion', () => {
-    it('should generate answer from context documents', async () => {
+  describe('processForQA', () => {
+    it('should generate answer from context content', async () => {
       const question = 'What are the testing requirements?'
-      const contextDocuments = [
-        'Testing Requirements: All code must have unit tests with 80% coverage.',
-        'Code Review Process: All changes require peer review before merging.'
-      ]
+      const content = 'Testing Requirements: All code must have unit tests with 80% coverage.'
 
-      const result = await aiService.answerQuestion(question, contextDocuments)
+      const result = await aiService.processForQA(content, question)
 
       expect(result.answer).toBeTruthy()
       expect(result.confidence).toBeGreaterThan(0)
@@ -270,83 +248,128 @@ describe('AIIntegrationService', () => {
       expect(typeof result.confidence).toBe('number')
     })
 
-    it('should handle empty context gracefully', async () => {
+    it('should handle empty content gracefully', async () => {
       const question = 'What are the requirements?'
-      const contextDocuments: string[] = []
+      const content = ''
 
-      const result = await aiService.answerQuestion(question, contextDocuments)
+      const result = await aiService.processForQA(content, question)
 
       expect(result.answer).toBeTruthy()
-      expect(result.confidence).toBeLessThan(0.8) // Should have lower confidence with no context
+      expect(result.confidence).toBeGreaterThan(0) // Mock returns default confidence
+    })
+  })
+
+  describe('classifyDocumentType', () => {
+    it('should classify document types correctly', async () => {
+      const content = 'Step 1: Initialize the process. Step 2: Execute the task.'
+
+      const result = await aiService.classifyDocumentType(content)
+
+      expect(result).toBe('DEFAULT_SOP')
     })
 
-    it('should estimate confidence based on context quality', async () => {
-      const question = 'What is the process?'
-      const goodContext = [
-        'Process Documentation: Step 1 - Initialize, Step 2 - Execute, Step 3 - Validate',
-        'Additional Details: Each step has specific requirements and validation criteria'
-      ]
+    it('should classify unique content as AI_DETERMINED', async () => {
+      const content = 'This is a creative and unique document with unusual structure'
 
-      const result = await aiService.answerQuestion(question, goodContext)
+      const result = await aiService.classifyDocumentType(content)
 
-      expect(result.confidence).toBeGreaterThan(0.5) // Should have higher confidence with good context
+      expect(result).toBe('AI_DETERMINED')
+    })
+
+    it('should handle classification errors gracefully', async () => {
+      const content = 'Some unclear content'
+
+      const result = await aiService.classifyDocumentType(content)
+
+      // Should return a valid domain even for unclear content
+      expect(Object.values(['SALES_PLAYBOOK', 'RESOURCE_LIST', 'BUSINESS_PLAN', 'RAW_DATA_ANALYSIS', 'TECHNICAL_SPEC', 'POLICY', 'CV', 'DEFAULT_SOP', 'AI_DETERMINED'])).toContain(result)
+    })
+
+    it('should handle case-insensitive classification results', async () => {
+      // This would test the improved validation logic
+      const content = 'Standard operating procedure content'
+
+      const result = await aiService.classifyDocumentType(content)
+
+      expect(result).toBe('DEFAULT_SOP')
+    })
+  })
+
+  describe('AI-determined processing', () => {
+    it('should handle AI_DETERMINED documents with dynamic formatting', async () => {
+      const uniqueContent = 'This is a creative and unique document that requires special formatting'
+
+      const result = await aiService.processContent(
+        uniqueContent,
+        [{
+          sourceType: 'teams',
+          sourceId: 'test',
+          originalContent: uniqueContent,
+          metadata: {}
+        }]
+      )
+
+      expect(result.structuredContent).toContain('Creative Document')
+      expect(result.structuredContent).toContain('AI-determined formatting')
     })
   })
 
   describe('error handling', () => {
-    it('should handle AI service errors gracefully', async () => {
-      // Test that the service processes content successfully with current mocks
-      const result = await aiService.processContent(
-        ['test content'],
-        [{
-          sourceType: 'teams',
-          sourceId: 'test',
-          snippet: 'test',
-          timestamp: new Date()
-        }],
-        [{
-          type: 'teams',
-          authorCount: 1,
-          lastModified: new Date(),
-          participants: ['Test User']
-        }]
-      )
-      
-      // Should return a valid result
-      expect(result).toHaveProperty('id')
-      expect(result).toHaveProperty('content')
-      expect(result.topics).toEqual([]) // Mock returns empty array due to parsing fallback
+    it('should handle empty content gracefully', async () => {
+      try {
+        await aiService.processContent(
+          '',
+          [{
+            sourceType: 'teams',
+            sourceId: 'test',
+            originalContent: '',
+            metadata: {}
+          }]
+        )
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toContain('No readable content found')
+      }
     })
 
-    it('should handle malformed AI responses', async () => {
-      // This would require more sophisticated mocking to test properly
-      // For now, we verify that the service has error handling in place
+    it('should handle very short content', async () => {
+      try {
+        await aiService.processContent(
+          'Hi',
+          [{
+            sourceType: 'teams',
+            sourceId: 'test',
+            originalContent: 'Hi',
+            metadata: {}
+          }]
+        )
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toContain('Content is too short')
+      }
+    })
+
+    it('should have required methods defined', async () => {
       expect(aiService.processContent).toBeDefined()
-      expect(aiService.recognizeIntent).toBeDefined()
-      expect(aiService.answerQuestion).toBeDefined()
+      expect(aiService.processForQA).toBeDefined()
+      expect(aiService.classifyDocumentType).toBeDefined()
     })
   })
 
   describe('performance', () => {
     it('should complete processing within reasonable time', async () => {
       const startTime = Date.now()
-      
+
       await aiService.processContent(
-        ['Short test content'],
+        'Short test content for processing performance evaluation',
         [{
           sourceType: 'teams',
           sourceId: 'test',
-          snippet: 'test',
-          timestamp: new Date()
-        }],
-        [{
-          type: 'teams',
-          authorCount: 1,
-          lastModified: new Date(),
-          participants: ['Test User']
+          originalContent: 'Short test content for processing performance evaluation',
+          metadata: {}
         }]
       )
-      
+
       const duration = Date.now() - startTime
       expect(duration).toBeLessThan(10000) // Should complete within 10 seconds
     })

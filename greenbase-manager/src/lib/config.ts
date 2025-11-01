@@ -21,6 +21,10 @@ export interface AppConfig {
       key: string
       region: string
     }
+    aiLanguage: {
+      endpoint: string
+      key: string
+    }
   }
   oauth: {
     microsoft: {
@@ -51,13 +55,24 @@ class ConfigService {
     // In production, fetch sensitive values from Azure Key Vault
     const isProduction = process.env.NODE_ENV === 'production'
 
+    let supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+    
+    if (isProduction) {
+      try {
+        const keyVaultKey = await this.keyVaultService.getSecret('supabase-service-role-key')
+        if (keyVaultKey) {
+          supabaseServiceRoleKey = keyVaultKey
+        }
+      } catch (error) {
+        console.warn('Failed to get Supabase service role key from Key Vault, using environment variable')
+      }
+    }
+
     this.config = {
       supabase: {
         url: process.env.NEXT_PUBLIC_SUPABASE_URL!,
         anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        serviceRoleKey: isProduction 
-          ? await this.keyVaultService.getSecret('supabase-service-role-key') || ''
-          : process.env.SUPABASE_SERVICE_ROLE_KEY!
+        serviceRoleKey: supabaseServiceRoleKey
       },
       azure: {
         keyVaultUrl: process.env.AZURE_KEY_VAULT_URL!,
@@ -85,6 +100,14 @@ class ConfigService {
           region: isProduction
             ? await this.keyVaultService.getSecret('azure-speech-region') || ''
             : process.env.AZURE_SPEECH_REGION!
+        },
+        aiLanguage: {
+          endpoint: isProduction
+            ? await this.keyVaultService.getSecret('azure-ai-language-endpoint') || ''
+            : process.env.AZURE_AI_LANGUAGE_ENDPOINT!,
+          key: isProduction
+            ? await this.keyVaultService.getSecret('azure-ai-language-key') || ''
+            : process.env.AZURE_AI_LANGUAGE_KEY!
         }
       },
       oauth: {

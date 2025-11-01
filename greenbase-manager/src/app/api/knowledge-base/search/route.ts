@@ -50,47 +50,80 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      // Try vector search first
+      // Try vector search first if embeddings are available
       const vectorSearchService = getVectorSearchService()
-      const searchResults = await vectorSearchService.searchDocuments(query, {
-        organizationId: user.organization_id,
-        limit: 20,
-        threshold: 0.5
-      })
+      let searchResults: any[] = []
+      let useVectorSearch = false
 
-      // Convert search results to document format
-      const documents = searchResults.map(result => ({
-        id: result.id,
-        title: result.title,
-        content: result.content,
-        summary: result.content.substring(0, 200) + '...',
-        tags: [], // Would need to be fetched separately
-        created_at: new Date().toISOString(), // Placeholder
-        updated_at: new Date().toISOString(), // Placeholder
-        approved_by: '', // Placeholder
-        version: 1,
-        similarity: result.similarity
-      }))
-
-      return NextResponse.json({ documents })
-
-    } catch (vectorError) {
-      console.warn('Vector search failed, falling back to text search:', vectorError)
-      
-      // Fallback to simple text search
-      const { data: documents, error } = await supabaseAdmin
-        .from('approved_documents')
-        .select('*')
-        .eq('organization_id', user.organization_id)
-        .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
-        .order('updated_at', { ascending: false })
-        .limit(20)
-
-      if (error) {
-        throw error
+      try {
+        searchResults = await vectorSearchService.searchDocuments(query, {
+          organizationId: user.organization_id,
+          limit: 20,
+          threshold: 0.3 // Lower threshold for more results
+        })
+        
+        if (searchResults.length > 0) {
+          useVectorSearch = true
+        }
+      } catch (vectorError) {
+        console.warn('Vector search failed, using text search:', vectorError)
       }
 
-      return NextResponse.json({ documents })
+      let documents: any[] = []
+
+      if (useVectorSearch && searchResults.length > 0) {
+        // Get full document details for vector search results
+        const documentIds = searchResults.map(r => r.id)
+        const { data: fullDocs, error: docsError } = await supabaseAdmin
+          .from('approved_documents')
+          .select('*')
+          .eq('organization_id', user.organization_id)
+          .in('id', documentIds)
+
+        if (!docsError && fullDocs) {
+          documents = fullDocs.map(doc => {
+            const searchResult = searchResults.find(r => r.id === doc.id)
+            return {
+              ...doc,
+              similarity: searchResult?.similarity || 0,
+              snippet: generateSnippet(doc.content, query)
+            }
+          }).sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
+        }
+      }
+
+      // Fallback to text search if vector search didn't work or returned no results
+      if (documents.length === 0) {
+        const { data: textSearchDocs, error } = await supabaseAdmin
+          .from('approved_documents')
+          .select('*')
+          .eq('organization_id', user.organization_id)
+          .or(`title.ilike.%${query}%,content.ilike.%${query}%,summary.ilike.%${query}%`)
+          .order('updated_at', { ascending: false })
+          .limit(20)
+
+        if (error) {
+          throw error
+        }
+
+        documents = (textSearchDocs || []).map(doc => ({
+          ...doc,
+          snippet: generateSnippet(doc.content, query)
+        }))
+      }
+
+      return NextResponse.json({ 
+        documents,
+        searchType: useVectorSearch ? 'semantic' : 'text',
+        totalResults: documents.length
+      })
+
+    } catch (searchError: any) {
+      console.error('Search failed:', searchError)
+      return NextResponse.json(
+        { error: 'Search failed', details: searchError.message },
+        { status: 500 }
+      )
     }
 
   } catch (error: any) {
@@ -100,4 +133,21 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+// Helper function to generate search snippets
+function generateSnippet(content: string, query: string, maxLength: number = 200): string {
+  const queryLower = query.toLowerCase()
+  const contentLower = content.toLowerCase()
+  const queryIndex = contentLower.indexOf(queryLower)
+  
+  if (queryIndex === -1) {
+    return content.substring(0, maxLength) + (content.length > maxLength ? '...' : '')
+  }
+  
+  const start = Math.max(0, queryIndex - 50)
+  const end = Math.min(content.length, queryIndex + query.length + 150)
+  const snippet = content.substring(start, end)
+  
+  return (start > 0 ? '...' : '') + snippet + (end < content.length ? '...' : '')
 }

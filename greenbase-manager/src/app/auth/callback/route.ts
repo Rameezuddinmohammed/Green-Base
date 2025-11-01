@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { ensureUserSetup } from '../../../lib/user-setup'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
@@ -32,6 +33,19 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
       console.log('OAuth session established successfully')
+      
+      // Ensure user is set up in database after successful auth
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user?.email) {
+          console.log('Setting up user after auth:', user.email)
+          await ensureUserSetup(user.id, user.email)
+        }
+      } catch (setupError) {
+        console.error('User setup failed after auth:', setupError)
+        // Continue anyway - user setup will be retried in dashboard
+      }
+      
       return NextResponse.redirect(`${origin}${next}`)
     }
     console.error('OAuth session error:', error)
@@ -62,6 +76,18 @@ export async function GET(request: NextRequest) {
     
     if (session && !error) {
       console.log('Session refreshed successfully')
+      
+      // Ensure user is set up in database
+      try {
+        if (session.user?.email) {
+          console.log('Setting up user after session refresh:', session.user.email)
+          await ensureUserSetup(session.user.id, session.user.email)
+        }
+      } catch (setupError) {
+        console.error('User setup failed after session refresh:', setupError)
+        // Continue anyway - user setup will be retried in dashboard
+      }
+      
       return NextResponse.redirect(`${origin}${next}`)
     }
     

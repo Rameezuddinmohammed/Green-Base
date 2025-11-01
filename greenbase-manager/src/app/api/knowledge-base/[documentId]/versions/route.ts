@@ -1,27 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '../../../../../lib/supabase-admin'
-import { getServerSession } from 'next-auth'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ documentId: string }> }
 ) {
   try {
-    const session = await getServerSession()
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options)
+            })
+          },
+        },
+      }
+    )
+    const { data: { session } } = await supabase.auth.getSession()
     
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { documentId } = await params
 
-    const supabase = await getSupabaseAdmin()
+    const supabaseAdmin = await getSupabaseAdmin()
     
     // Get user's organization
-    const { data: user } = await supabase
+    const { data: user } = await supabaseAdmin
       .from('users')
       .select('organization_id')
-      .eq('email', session.user.email)
+      .eq('id', session.user.id)
       .single()
 
     if (!user) {
@@ -29,7 +47,7 @@ export async function GET(
     }
 
     // Verify document belongs to user's organization
-    const { data: document } = await supabase
+    const { data: document } = await supabaseAdmin
       .from('approved_documents')
       .select('organization_id')
       .eq('id', documentId)
@@ -40,10 +58,13 @@ export async function GET(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    // Get document versions
-    const { data: versions, error } = await supabase
+    // Get document versions with user information
+    const { data: versions, error } = await supabaseAdmin
       .from('document_versions')
-      .select('*')
+      .select(`
+        *,
+        approver:users!approved_by(email)
+      `)
       .eq('document_id', documentId)
       .order('version', { ascending: false })
 
@@ -51,7 +72,13 @@ export async function GET(
       throw error
     }
 
-    return NextResponse.json({ versions })
+    // Format versions for display
+    const formattedVersions = versions?.map(version => ({
+      ...version,
+      approved_by: version.approver?.email || version.approved_by
+    })) || []
+
+    return NextResponse.json({ versions: formattedVersions })
   } catch (error: any) {
     console.error('Get document versions error:', error)
     return NextResponse.json(

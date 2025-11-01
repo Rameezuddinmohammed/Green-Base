@@ -71,7 +71,8 @@ export async function POST(request: NextRequest) {
         tags: draftDoc.topics || [],
         organization_id: user.organization_id,
         approved_by: user.id,
-        version: 1
+        version: 1,
+        source_draft_id: draftDoc.id // Track the original draft
       }
       
       approvedDocuments.push(approvedDoc)

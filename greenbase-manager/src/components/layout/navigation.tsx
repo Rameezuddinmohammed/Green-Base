@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { 
@@ -11,7 +11,6 @@ import {
   BookOpen, 
   Settings, 
   Search,
-  User,
   Bell,
   Command,
   Moon,
@@ -19,6 +18,7 @@ import {
   LogOut
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
+import { usePendingCount } from "@/contexts/pending-count-context"
 
 
 interface NavigationProps {
@@ -27,14 +27,31 @@ interface NavigationProps {
 
 export function Navigation({ pendingCount = 0 }: NavigationProps) {
   const pathname = usePathname()
-  const router = useRouter()
-  const { user, signOut } = useAuth()
+  const { signOut } = useAuth()
+  const { pendingCount: contextPendingCount, refreshPendingCount, isRefreshing } = usePendingCount()
   const [isDark, setIsDark] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  
+  // Use the context pending count instead of prop
+  const displayPendingCount = contextPendingCount
 
   const handleSignOut = async () => {
-    await signOut()
+    if (isSigningOut) return // Prevent double-clicks
+    
+    try {
+      setIsSigningOut(true)
+      console.log('🔄 Navigation: Starting sign out...')
+      await signOut()
+      console.log('✅ Navigation: Sign out completed')
+    } catch (error) {
+      console.error('❌ Navigation: Sign out failed:', error)
+      // Force redirect as fallback
+      window.location.href = '/auth/signin'
+    } finally {
+      setIsSigningOut(false)
+    }
   }
 
   // Prevent hydration mismatch
@@ -70,7 +87,7 @@ export function Navigation({ pendingCount = 0 }: NavigationProps) {
       href: "/dashboard/approvals",
       icon: FileText,
       current: pathname.startsWith("/dashboard/approvals"),
-      badge: pendingCount > 0 ? pendingCount : undefined
+      badge: displayPendingCount > 0 ? displayPendingCount : undefined
     },
     {
       name: "Knowledge Base",
@@ -134,7 +151,7 @@ export function Navigation({ pendingCount = 0 }: NavigationProps) {
                       <Icon className="w-4 h-4 mr-2" />
                       {item.name}
                       {item.badge && (
-                        <Badge className="ml-2 bg-primary text-primary-foreground hover:bg-primary/90 text-xs">
+                        <Badge className="ml-2 bg-primary text-primary-foreground hover:bg-primary/90 text-xs px-2 py-1 min-w-[20px] flex items-center justify-center">
                           {item.badge}
                         </Badge>
                       )}
@@ -183,9 +200,16 @@ export function Navigation({ pendingCount = 0 }: NavigationProps) {
               </Button>
 
               {/* Notifications */}
-              <Button variant="ghost" size="sm" className="w-9 h-9 p-0 relative">
-                <Bell className="w-4 h-4" />
-                {pendingCount > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="w-9 h-9 p-0 relative"
+                onClick={refreshPendingCount}
+                disabled={isRefreshing}
+                title={isRefreshing ? "Refreshing..." : "Refresh pending count"}
+              >
+                <Bell className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {displayPendingCount > 0 && (
                   <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse" />
                 )}
               </Button>
@@ -195,10 +219,11 @@ export function Navigation({ pendingCount = 0 }: NavigationProps) {
                 variant="ghost" 
                 size="sm" 
                 onClick={handleSignOut}
+                disabled={isSigningOut}
                 className="w-9 h-9 p-0"
-                title="Sign Out"
+                title={isSigningOut ? "Signing out..." : "Sign Out"}
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className={`w-4 h-4 ${isSigningOut ? 'animate-spin' : ''}`} />
               </Button>
             </div>
           </div>
@@ -222,7 +247,7 @@ export function Navigation({ pendingCount = 0 }: NavigationProps) {
                   <Icon className="w-5 h-5 mr-3" />
                   {item.name}
                   {item.badge && (
-                    <Badge className="ml-auto bg-primary text-primary-foreground hover:bg-primary/90 text-xs">
+                    <Badge className="ml-auto bg-primary text-primary-foreground hover:bg-primary/90 text-xs px-2 py-1">
                       {item.badge}
                     </Badge>
                   )}

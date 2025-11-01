@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   try {
     console.log('🧪 Starting sync debug test...')
     
@@ -9,14 +9,14 @@ export async function POST(request: NextRequest) {
     
     // Test 2: Supabase admin
     try {
-      const { getSupabaseAdmin } = await import('../../../../../lib/supabase-admin')
+      const { getSupabaseAdmin } = await import('../../../../lib/supabase-admin')
       console.log('✅ Supabase admin import successful')
       
       const adminClient = await getSupabaseAdmin()
       console.log('✅ Supabase admin client created')
       
       // Test basic query
-      const { data, error } = await adminClient
+      const { error } = await adminClient
         .from('connected_sources')
         .select('count')
         .limit(1)
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     
     // Test 3: Change detection service
     try {
-      const { getChangeDetectionService } = await import('../../../../../lib/ingestion/change-detection-service')
+      const { getChangeDetectionService } = await import('../../../../lib/ingestion/change-detection-service')
       console.log('✅ Change detection service import successful')
       
       const changeService = getChangeDetectionService()

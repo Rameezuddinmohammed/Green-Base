@@ -16,10 +16,10 @@ export default function Home() {
             organizes, and maintains your team's knowledge base from Teams and Google Drive content.
           </p>
           <div className="flex gap-4 justify-center">
-            <Link href="/dashboard">
+            <Link href="/auth/signup">
               <Button size="lg" className="text-lg px-8 py-3">
                 <BookOpen className="w-5 h-5 mr-2" />
-                Go to Dashboard
+                Get Started
               </Button>
             </Link>
             <Link href="/auth/signin">

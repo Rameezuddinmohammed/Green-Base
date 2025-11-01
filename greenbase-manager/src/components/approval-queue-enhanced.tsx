@@ -4,17 +4,17 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-
+import { showToast } from "@/components/ui/toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { 
-  CheckCircle, 
-  XCircle, 
-  Edit, 
-  ThumbsUp, 
+import {
+  CheckCircle,
+  XCircle,
+  Edit,
+  ThumbsUp,
   Filter,
   ArrowUpDown,
   FileText,
@@ -24,6 +24,7 @@ import {
   GitCompare,
   Sparkles
 } from "lucide-react"
+import { usePendingCount } from "@/contexts/pending-count-context"
 
 interface SourceDocument {
   id: string
@@ -50,6 +51,8 @@ interface DraftDocument {
   status: string
   author?: string
   changes_made?: string[]
+  is_update?: boolean
+  original_document_id?: string
 }
 
 interface ConfidenceRingProps {
@@ -62,7 +65,7 @@ function ConfidenceRing({ score, size = 40 }: ConfidenceRingProps) {
   const circumference = 2 * Math.PI * 16
   const strokeDasharray = circumference
   const strokeDashoffset = circumference - (percentage / 100) * circumference
-  
+
   const getColor = (score: number) => {
     if (score >= 0.8) return "hsl(142, 76%, 36%)" // green-600 ≥80%
     if (score >= 0.6) return "hsl(32, 95%, 44%)" // orange-500 ≥60%
@@ -103,8 +106,13 @@ function ConfidenceRing({ score, size = 40 }: ConfidenceRingProps) {
 }
 
 export function ApprovalQueueEnhanced() {
+  const { refreshPendingCount } = usePendingCount()
   const [drafts, setDrafts] = useState<DraftDocument[]>([])
   const [loading, setLoading] = useState(true)
+  const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set())
+  const [rejectingIds, setRejectingIds] = useState<Set<string>>(new Set())
+  const [batchProcessing, setBatchProcessing] = useState(false)
+  const [successIds, setSuccessIds] = useState<Set<string>>(new Set())
 
   const [editingDraft, setEditingDraft] = useState<DraftDocument | null>(null)
   const [editedContent, setEditedContent] = useState("")
@@ -130,7 +138,7 @@ export function ApprovalQueueEnhanced() {
         handleBatchApproveAllGreen()
         return
       }
-      
+
       // Individual item shortcuts with Ctrl modifier for safety
       if (e.ctrlKey && !e.shiftKey) {
         switch (e.key.toLowerCase()) {
@@ -160,6 +168,8 @@ export function ApprovalQueueEnhanced() {
       if (response.ok) {
         const data = await response.json()
         setDrafts(data.drafts || [])
+        // Also refresh the pending count when drafts are loaded
+        refreshPendingCount()
       }
     } catch (error) {
       console.error('Failed to load drafts:', error)
@@ -172,29 +182,117 @@ export function ApprovalQueueEnhanced() {
 
   const handleApprove = async (draftId: string) => {
     try {
+      setApprovingIds(prev => new Set(prev).add(draftId))
+
       const response = await fetch(`/api/drafts/${draftId}/approve`, {
         method: 'POST'
       })
-      
+
       if (response.ok) {
+        // Show success animation briefly
+        setSuccessIds(prev => new Set(prev).add(draftId))
+
+        // Show success toast
+        const draft = drafts.find(d => d.id === draftId)
+        const draftTitle = draft?.title || 'Document'
+        const isUpdate = draft?.is_update || false
+        showToast({
+          type: 'success',
+          title: isUpdate ? 'Document Updated' : 'Document Approved',
+          description: isUpdate
+            ? `"${draftTitle}" has been updated to a new version in the Knowledge Base.`
+            : `"${draftTitle}" has been approved and added to the Knowledge Base.`
+        })
+
+        // Remove from UI after brief delay
+        setTimeout(() => {
+          setDrafts(prev => prev.filter(d => d.id !== draftId))
+          setSuccessIds(prev => {
+            const next = new Set(prev)
+            next.delete(draftId)
+            return next
+          })
+          // Immediately refresh the pending count in navigation
+          refreshPendingCount()
+        }, 500)
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Approval Failed',
+          description: 'Failed to approve document. Please try again.'
+        })
         await loadDrafts()
       }
     } catch (error) {
       console.error('Failed to approve draft:', error)
+      showToast({
+        type: 'error',
+        title: 'Approval Failed',
+        description: 'Failed to approve document. Please try again.'
+      })
+      await loadDrafts()
+    } finally {
+      setApprovingIds(prev => {
+        const next = new Set(prev)
+        next.delete(draftId)
+        return next
+      })
     }
   }
 
   const handleReject = async (draftId: string) => {
     try {
+      setRejectingIds(prev => new Set(prev).add(draftId))
+
       const response = await fetch(`/api/drafts/${draftId}/reject`, {
         method: 'POST'
       })
-      
+
       if (response.ok) {
+        // Show success animation briefly
+        setSuccessIds(prev => new Set(prev).add(draftId))
+
+        // Show success toast
+        const draftTitle = drafts.find(d => d.id === draftId)?.title || 'Document'
+        showToast({
+          type: 'success',
+          title: 'Document Rejected',
+          description: `"${draftTitle}" has been rejected and removed from the queue.`
+        })
+
+        // Remove from UI after brief delay
+        setTimeout(() => {
+          setDrafts(prev => prev.filter(d => d.id !== draftId))
+          setSuccessIds(prev => {
+            const next = new Set(prev)
+            next.delete(draftId)
+            return next
+          })
+          // Immediately refresh the pending count in navigation
+          refreshPendingCount()
+        }, 500)
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Rejection Failed',
+          description: 'Failed to reject document. Please try again.'
+        })
         await loadDrafts()
       }
     } catch (error) {
       console.error('Failed to reject draft:', error)
+      showToast({
+        type: 'error',
+        title: 'Rejection Failed',
+        description: 'Failed to reject document. Please try again.'
+      })
+      await loadDrafts()
+    } finally {
+      setRejectingIds(prev => {
+        const next = new Set(prev)
+        next.delete(draftId)
+        return next
+      })
     }
   }
 
@@ -207,7 +305,7 @@ export function ApprovalQueueEnhanced() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ editedContent })
       })
-      
+
       if (response.ok) {
         await loadDrafts()
         setEditingDraft(null)
@@ -256,23 +354,58 @@ export function ApprovalQueueEnhanced() {
 
   const handleBatchApproveAllGreen = async () => {
     try {
+      setBatchProcessing(true)
+
       // Get all green items from current filtered list
       const greenItems = pendingDrafts.filter((draft: DraftDocument) => draft.triage_level === 'green')
       const greenIds = greenItems.map((draft: DraftDocument) => draft.id)
-      
+
       if (greenIds.length === 0) return
-      
+
+      // Mark all as approving
+      setApprovingIds(new Set(greenIds))
+
       const response = await fetch('/api/drafts/batch-approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentIds: greenIds })
       })
-      
+
       if (response.ok) {
+        // Show success animation for all items
+        setSuccessIds(new Set(greenIds))
+
+        // Show success toast
+        showToast({
+          type: 'success',
+          title: 'Batch Approval Complete',
+          description: `${greenIds.length} documents have been approved and added to the Knowledge Base.`
+        })
+
+        // Remove from UI after brief delay
+        setTimeout(() => {
+          setDrafts(prev => prev.filter(d => !greenIds.includes(d.id)))
+          setSuccessIds(new Set())
+        }, 500)
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Batch Approval Failed',
+          description: 'Failed to approve documents. Please try again.'
+        })
         await loadDrafts()
       }
     } catch (error) {
       console.error('Failed to batch approve:', error)
+      showToast({
+        type: 'error',
+        title: 'Batch Approval Failed',
+        description: 'Failed to approve documents. Please try again.'
+      })
+      await loadDrafts()
+    } finally {
+      setBatchProcessing(false)
+      setApprovingIds(new Set())
     }
   }
 
@@ -289,8 +422,8 @@ export function ApprovalQueueEnhanced() {
               <CardDescription>
                 AI-processed documents awaiting review
                 <span className="ml-4 text-xs text-muted-foreground">
-                  Individual: <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+A</kbd> approve 
-                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+R</kbd> reject 
+                  Individual: <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+A</kbd> approve
+                  <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+R</kbd> reject
                   <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+E</kbd> edit
                   • Batch: <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-xs">Ctrl+Shift+A</kbd> approve all green
                 </span>
@@ -328,7 +461,7 @@ export function ApprovalQueueEnhanced() {
               </CardTitle>
               <CardDescription>AI-processed documents awaiting review</CardDescription>
             </div>
-            
+
             <div className="flex items-center space-x-2">
               {/* Filters */}
               <Select value={filterBy} onValueChange={(value: any) => setFilterBy(value)}>
@@ -363,13 +496,23 @@ export function ApprovalQueueEnhanced() {
                 return greenCount > 0 && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button 
-                        onClick={handleBatchApproveAllGreen} 
-                        className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2"
+                      <Button
+                        onClick={handleBatchApproveAllGreen}
+                        disabled={batchProcessing}
+                        className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2 disabled:opacity-50 transition-all duration-200"
                         size="lg"
                       >
-                        <ThumbsUp className="h-5 w-5 mr-2" />
-                        Approve all Green drafts
+                        {batchProcessing ? (
+                          <>
+                            <div className="h-5 w-5 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            Approving All...
+                          </>
+                        ) : (
+                          <>
+                            <ThumbsUp className="h-5 w-5 mr-2" />
+                            Approve all Green drafts
+                          </>
+                        )}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -381,7 +524,7 @@ export function ApprovalQueueEnhanced() {
             </div>
           </div>
         </CardHeader>
-        
+
         <CardContent>
           {pendingDrafts.length === 0 ? (
             <div className="text-center py-12">
@@ -392,7 +535,15 @@ export function ApprovalQueueEnhanced() {
           ) : (
             <div className="space-y-4">
               {pendingDrafts.map((draft) => (
-                <Card key={draft.id} className="transition-all duration-200 hover:shadow-md">
+                <Card
+                  key={draft.id}
+                  className={`transition-all duration-500 hover:shadow-md ${successIds.has(draft.id)
+                    ? 'opacity-0 scale-95 ring-2 ring-green-200 bg-green-50'
+                    : (approvingIds.has(draft.id) || rejectingIds.has(draft.id))
+                      ? 'opacity-75 scale-[0.98] ring-2 ring-blue-200 animate-pulse'
+                      : ''
+                    }`}
+                >
                   <CardContent className="p-6">
                     <div className="flex items-start space-x-4">
 
@@ -400,8 +551,8 @@ export function ApprovalQueueEnhanced() {
                       {/* Confidence Ring with Visual Icons */}
                       <div className="flex-shrink-0 flex items-center space-x-2">
                         <div className="text-lg">
-                          {draft.confidence_score >= 0.85 ? '🟢' : 
-                           draft.confidence_score >= 0.60 ? '🟡' : '🔴'}
+                          {draft.confidence_score >= 0.85 ? '🟢' :
+                            draft.confidence_score >= 0.60 ? '🟡' : '🔴'}
                         </div>
                         <ConfidenceRing score={draft.confidence_score} />
                       </div>
@@ -411,23 +562,50 @@ export function ApprovalQueueEnhanced() {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="mb-2">
-                              <h3 className="text-lg font-semibold text-foreground">
-                                {(() => {
-                                  // Try to get original filename from source references
-                                  const originalTitle = draft.source_references?.[0]?.title || 
-                                                      draft.source_documents?.[0]?.metadata?.fileName ||
-                                                      draft.title
-                                  return originalTitle
-                                })()}
-                              </h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-lg font-semibold text-foreground">
+                                  {(() => {
+                                    // Try to get original filename from source references
+                                    const originalTitle = draft.source_references?.[0]?.title ||
+                                      draft.source_documents?.[0]?.metadata?.fileName ||
+                                      draft.title
+                                    return originalTitle
+                                  })()}
+                                </h3>
+                                {/* Update Badge */}
+                                {draft.is_update && (
+                                  <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+                                    🔄 Update
+                                  </Badge>
+                                )}
+                              </div>
                               {/* Show AI-generated topic as subtitle if different from filename */}
                               {draft.topics && draft.topics.length > 0 && (
                                 <p className="text-sm text-muted-foreground mt-1">
                                   {draft.topics[0]}
                                 </p>
                               )}
+                              {/* Changes Summary for Updates */}
+                              {draft.is_update && draft.changes_made && draft.changes_made.length > 0 && (
+                                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <div className="flex items-start gap-2">
+                                    <Sparkles className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1">
+                                      <p className="text-xs font-semibold text-blue-800 mb-1">Changes Detected:</p>
+                                      <ul className="text-xs text-blue-700 space-y-1">
+                                        {draft.changes_made.map((change, idx) => (
+                                          <li key={idx} className="flex items-start gap-1">
+                                            <span className="text-blue-400 mt-0.5">•</span>
+                                            <span>{change}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                            
+
                             {/* Metadata */}
                             <div className="flex items-center space-x-4 text-sm text-muted-foreground mb-3">
                               <div className="flex items-center">
@@ -435,9 +613,9 @@ export function ApprovalQueueEnhanced() {
                                 {(() => {
                                   if (typeof window === 'undefined') return 'Loading...'
                                   // Try to get source file timestamp, fallback to draft creation
-                                  const sourceTimestamp = draft.source_documents?.[0]?.metadata?.createdAt || 
-                                                        draft.source_references?.[0]?.createdAt ||
-                                                        draft.created_at
+                                  const sourceTimestamp = draft.source_documents?.[0]?.metadata?.createdAt ||
+                                    draft.source_references?.[0]?.createdAt ||
+                                    draft.created_at
                                   return new Date(sourceTimestamp).toLocaleString()
                                 })()}
                               </div>
@@ -501,17 +679,27 @@ export function ApprovalQueueEnhanced() {
                               <Button
                                 size="sm"
                                 onClick={() => handleApprove(draft.id)}
-                                className="bg-green-600 hover:bg-green-700 relative"
+                                disabled={approvingIds.has(draft.id) || rejectingIds.has(draft.id)}
+                                className="bg-green-600 hover:bg-green-700 relative disabled:opacity-50 transition-all duration-200"
                               >
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Approve
+                                {approvingIds.has(draft.id) ? (
+                                  <>
+                                    <div className="h-4 w-4 mr-1 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                    Approving...
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckCircle className="h-4 w-4 mr-1" />
+                                    Approve
+                                  </>
+                                )}
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
                               <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+A</kbd>
                             </TooltipContent>
                           </Tooltip>
-                          
+
                           <Button
                             variant="outline"
                             size="sm"
@@ -522,7 +710,7 @@ export function ApprovalQueueEnhanced() {
                             <GitCompare className="h-4 w-4 mr-1" />
                             View Diff
                           </Button>
-                          
+
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -541,17 +729,27 @@ export function ApprovalQueueEnhanced() {
                               <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Ctrl+E</kbd>
                             </TooltipContent>
                           </Tooltip>
-                          
+
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleReject(draft.id)}
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                disabled={approvingIds.has(draft.id) || rejectingIds.has(draft.id)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50 disabled:opacity-50 transition-all duration-200"
                               >
-                                <XCircle className="h-4 w-4 mr-1" />
-                                Reject
+                                {rejectingIds.has(draft.id) ? (
+                                  <>
+                                    <div className="h-4 w-4 mr-1 animate-spin rounded-full border-2 border-red-600 border-t-transparent" />
+                                    Rejecting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <XCircle className="h-4 w-4 mr-1" />
+                                    Reject
+                                  </>
+                                )}
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -567,7 +765,7 @@ export function ApprovalQueueEnhanced() {
                               <GitCompare className="h-4 w-4 mr-2" />
                               Source Content vs AI Structured Draft
                             </h4>
-                            
+
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                               {/* Original Source Content */}
                               <div className="space-y-3">
@@ -618,7 +816,7 @@ export function ApprovalQueueEnhanced() {
                               <div className="mt-4 pt-4 border-t">
                                 <h6 className="text-sm font-semibold text-purple-700 mb-3 flex items-center">
                                   <Sparkles className="h-4 w-4 mr-2" />
-                                  AI Confidence Assessment
+                                  Dan's Assessment
                                 </h6>
                                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
                                   <p className="text-sm text-purple-800 leading-relaxed">

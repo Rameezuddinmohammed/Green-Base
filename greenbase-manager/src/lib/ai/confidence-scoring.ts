@@ -26,6 +26,9 @@ export interface ConfidenceResult {
   factors: ConfidenceFactors
   reasoning: string
   sourceQualityPenalty?: number
+  aiDriven?: boolean
+  recommendations?: string[]
+  confidenceLevel?: string
 }
 
 export interface SourceMetadata {
@@ -55,24 +58,57 @@ export class ConfidenceScoring {
     sourceMetadata: SourceMetadata[],
     aiAssessment?: any,
     originalSourceQuality?: OriginalSourceQuality,
-    weights: ConfidenceWeights = ConfidenceScoring.DEFAULT_WEIGHTS
+    weights: ConfidenceWeights = ConfidenceScoring.DEFAULT_WEIGHTS,
+    changesSummary?: string[]
   ): ConfidenceResult {
+    // Prioritize AI's overall score if available (dynamic scoring)
+    if (aiAssessment?.overallScore && typeof aiAssessment.overallScore === 'number') {
+      console.log('🤖 Using AI-determined overall confidence score:', aiAssessment.overallScore)
+
+      let score = aiAssessment.overallScore
+
+      // Apply minimal source quality penalty for very poor sources
+      const sourceQualityPenalty = originalSourceQuality?.rawContentQualityLevel === 'low' ? 0.05 : 0
+      score = Math.max(0, score - sourceQualityPenalty)
+
+      const level = this.determineLevel(score)
+      const factors = this.calculateFactors(content, sourceMetadata, aiAssessment, originalSourceQuality)
+
+      // Use AI reasoning if available, otherwise generate
+      const reasoning = aiAssessment.reasoning ||
+        this.generateReasoning(factors, score, level, originalSourceQuality, sourceQualityPenalty, changesSummary, aiAssessment)
+
+      return {
+        score,
+        level,
+        factors,
+        reasoning,
+        sourceQualityPenalty,
+        aiDriven: true,
+        recommendations: aiAssessment.recommendations,
+        confidenceLevel: aiAssessment.confidenceLevel
+      }
+    }
+
+    // Fallback to heuristic scoring
+    console.log('📊 Using heuristic confidence scoring (AI assessment unavailable)')
     const factors = this.calculateFactors(content, sourceMetadata, aiAssessment, originalSourceQuality)
     let score = this.calculateWeightedScore(factors, weights)
-    
+
     // Apply source quality penalty
     const sourceQualityPenalty = originalSourceQuality ? this.calculateSourceQualityPenalty(originalSourceQuality) : 0
     score = Math.max(0, score - sourceQualityPenalty)
-    
+
     const level = this.determineLevel(score)
-    const reasoning = this.generateReasoning(factors, score, level, originalSourceQuality, sourceQualityPenalty)
+    const reasoning = this.generateReasoning(factors, score, level, originalSourceQuality, sourceQualityPenalty, changesSummary, aiAssessment)
 
     return {
       score,
       level,
       factors,
       reasoning,
-      sourceQualityPenalty
+      sourceQualityPenalty,
+      aiDriven: false
     }
   }
 
@@ -97,16 +133,18 @@ export class ConfidenceScoring {
       return aiAssessment.factors.contentClarity
     }
 
-    // Much stricter heuristic fallback - require multiple positive indicators
-    let score = 0.1 // Very low base score
+    // Assess the final content quality regardless of source
+    let score = 0.1 // Base score
 
-    // Check for structure indicators (require multiple for high scores)
+    // Check for structure indicators
     const hasHeadings = /^#{1,6}\s/m.test(content)
     const hasNumberedLists = /^\s*\d+\.\s/m.test(content)
     const hasBulletPoints = /^\s*[-*+]\s/m.test(content)
     const hasProperSentences = content.split(/[.!?]+/).filter(s => s.trim().length > 10).length > 3
     const hasGoodStructure = content.includes('\n\n') && content.length > 300
     const hasSections = (content.match(/^#{1,6}\s/gm) || []).length >= 2
+    const hasFormattedText = /\*\*[^*]+\*\*/.test(content) // Bold text
+    const hasCoherentParagraphs = content.split('\n\n').filter(p => p.trim().length > 50).length >= 2
 
     // Count positive indicators
     let positiveIndicators = 0
@@ -116,41 +154,45 @@ export class ConfidenceScoring {
     if (hasProperSentences) positiveIndicators++
     if (hasGoodStructure) positiveIndicators++
     if (hasSections) positiveIndicators++
+    if (hasFormattedText) positiveIndicators++
+    if (hasCoherentParagraphs) positiveIndicators++
 
-    // Require multiple indicators for decent scores
-    if (positiveIndicators >= 5) score = 0.8  // Excellent structure
-    else if (positiveIndicators >= 4) score = 0.65
-    else if (positiveIndicators >= 3) score = 0.5
-    else if (positiveIndicators >= 2) score = 0.35
-    else if (positiveIndicators >= 1) score = 0.2
+    // Score based on indicators (more generous for well-structured content)
+    if (positiveIndicators >= 6) score = 0.9   // Excellent structure
+    else if (positiveIndicators >= 5) score = 0.8  // Very good structure
+    else if (positiveIndicators >= 4) score = 0.7  // Good structure
+    else if (positiveIndicators >= 3) score = 0.6  // Decent structure
+    else if (positiveIndicators >= 2) score = 0.4  // Basic structure
+    else if (positiveIndicators >= 1) score = 0.25 // Minimal structure
 
-    // Heavy penalties for poor content
-    if (content.length < 150) score *= 0.3  // Very short content
-    else if (content.length < 300) score *= 0.6
-    
-    if (content.split('\n').length < 5) score *= 0.5  // Not enough lines
-    
-    // Penalize lack of proper formatting
-    if (!hasHeadings && !hasNumberedLists) score *= 0.6
+    // Check for content quality indicators
+    const wordCount = content.split(/\s+/).filter(w => w.length > 0).length
+    const avgWordsPerSentence = wordCount / (content.split(/[.!?]+/).length || 1)
+    const hasGoodLength = content.length >= 500 && content.length <= 10000
+    const hasVariedSentenceLength = content.split(/[.!?]+/).map(s => s.trim().split(/\s+/).length).filter(l => l > 5 && l < 30).length > 3
 
-    // Check readability (stricter requirements)
-    const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 5)
-    const avgSentenceLength = content.length / (sentences.length || 1)
-    if (avgSentenceLength > 20 && avgSentenceLength < 120) {
-      score += 0.05  // Small bonus for good readability
-    }
+    // Bonuses for quality content
+    if (hasGoodLength) score += 0.1
+    if (avgWordsPerSentence > 8 && avgWordsPerSentence < 25) score += 0.05
+    if (hasVariedSentenceLength) score += 0.05
 
-    // Apply penalty if final structure is much better than original source
-    if (originalSourceQuality) {
-      const structureImprovement = score - originalSourceQuality.rawContentStructureScore
-      if (structureImprovement > 0.4) {
-        // Significant AI enhancement - apply moderate penalty
-        score *= 0.9
-        console.log(`Applied structure enhancement penalty: final clarity reduced by 10%`)
+    // Special handling for AI-enhanced content from poor sources
+    if (originalSourceQuality && originalSourceQuality.rawContentQualityLevel === 'low') {
+      // If the final content is well-structured despite poor source, give AI credit
+      if (score >= 0.7 && positiveIndicators >= 5) {
+        console.log('🤖 AI successfully enhanced poor source content - applying bonus')
+        score = Math.min(1.0, score + 0.1) // 10% bonus for successful AI enhancement
+      } else if (score >= 0.5 && positiveIndicators >= 3) {
+        console.log('🤖 AI moderately enhanced poor source content')
+        score = Math.min(1.0, score + 0.05) // 5% bonus for moderate enhancement
       }
     }
 
-    console.log(`Heuristic contentClarity: ${score.toFixed(2)} (indicators: ${positiveIndicators}/6, length: ${content.length})`)
+    // Only apply minor penalties for very poor final content
+    if (content.length < 100) score *= 0.4  // Very short content
+    else if (content.length < 200) score *= 0.7
+
+    console.log(`Content clarity: ${score.toFixed(2)} (indicators: ${positiveIndicators}/8, words: ${wordCount}, source: ${originalSourceQuality?.rawContentQualityLevel || 'unknown'})`)
     return Math.min(1, score)
   }
 
@@ -176,14 +218,12 @@ export class ConfidenceScoring {
     const totalLength = content.length
     if (totalLength === 0) return 0
 
-    // Very aggressive noise detection for SOPs/wikis
+    // Moderate noise detection - focus on final content quality
     const noisePatterns = [
-      /\b(um|uh|like|you know|basically|actually|whatever|stuff|things?|kinda|sorta|just|really)\b/gi,
-      /\b(thanks|thank you|please|hi|hello|bye|ok|okay|yeah|yes|no|sure)\b/gi,
-      /[.]{2,}/g, // Multiple dots
-      /\s+/g, // Multiple spaces
-      /\b(lol|haha|hmm|well|so|but|and then|i think|maybe|probably|guess|suppose)\b/gi,
-      /\b(idk|tbh|btw|fyi|asap|etc)\b/gi // Common abbreviations that add noise
+      /\b(um|uh|like|you know|basically|whatever|stuff|things?|kinda|sorta)\b/gi,
+      /[.]{3,}/g, // Multiple dots (but allow ellipsis)
+      /\s{3,}/g, // Multiple spaces
+      /\b(lol|haha|hmm)\b/gi
     ]
 
     let cleanContent = content
@@ -194,45 +234,47 @@ export class ConfidenceScoring {
     const cleanLength = cleanContent.trim().length
     let density = cleanLength / totalLength
 
-    // Extremely strict penalties for short content
-    if (totalLength < 100) density *= 0.2  // Increased penalty
-    else if (totalLength < 200) density *= 0.4  // Increased penalty
-    else if (totalLength < 400) density *= 0.6  // Increased penalty
+    // More reasonable penalties for short content
+    if (totalLength < 100) density *= 0.5
+    else if (totalLength < 200) density *= 0.7
+    else if (totalLength < 300) density *= 0.85
 
-    // Stricter penalties for repetitive content
+    // Check vocabulary diversity
     const words = content.toLowerCase().split(/\s+/).filter(w => w.length > 2)
     const uniqueWords = new Set(words)
     const repetitionRatio = uniqueWords.size / (words.length || 1)
-    
-    if (repetitionRatio < 0.4) density *= 0.4  // Very repetitive
-    else if (repetitionRatio < 0.6) density *= 0.7  // Somewhat repetitive
 
-    // Penalize content with too many questions (indicates uncertainty)
-    const questionCount = (content.match(/\?/g) || []).length
-    if (questionCount > 3) density *= 0.8
+    if (repetitionRatio < 0.3) density *= 0.6  // Very repetitive
+    else if (repetitionRatio < 0.5) density *= 0.8  // Somewhat repetitive
+    else if (repetitionRatio > 0.7) density += 0.05 // Good vocabulary diversity
 
-    // Very small bonus for structure, only if content is substantial and well-formatted
-    const structureBonus = (totalLength > 300 && /^\s*\d+\.\s/m.test(content)) ? 0.03 : 0
+    // Check for informational content indicators
+    const hasDefinitions = /:\s*[A-Z]/.test(content) // Colon followed by definition
+    const hasExamples = /\b(example|for instance|such as|including)\b/gi.test(content)
+    const hasInstructions = /\b(step|procedure|process|method|how to)\b/gi.test(content)
+    const hasSpecificDetails = /\b\d+\b/.test(content) // Contains numbers/specifics
 
-    // Apply penalty based on original source quality
-    if (originalSourceQuality) {
-      const lengthExpansion = totalLength / (originalSourceQuality.rawContentLength || 1)
-      
-      // If AI significantly expanded very short source, apply penalty
-      if (originalSourceQuality.rawContentLength < 200 && lengthExpansion > 2) {
-        density *= 0.7 // 30% penalty for significant expansion of short source
-        console.log(`Applied expansion penalty: original ${originalSourceQuality.rawContentLength} chars expanded to ${totalLength}`)
-      }
-      
-      // If original had very low unique word ratio, apply penalty
-      if (originalSourceQuality.rawContentUniqueWordRatio < 0.4) {
-        density *= 0.8 // 20% penalty for poor original vocabulary
-        console.log(`Applied vocabulary penalty: original unique ratio ${originalSourceQuality.rawContentUniqueWordRatio.toFixed(2)}`)
+    let informationBonus = 0
+    if (hasDefinitions) informationBonus += 0.05
+    if (hasExamples) informationBonus += 0.05
+    if (hasInstructions) informationBonus += 0.05
+    if (hasSpecificDetails) informationBonus += 0.03
+
+    // Bonus for well-structured content
+    const structureBonus = (totalLength > 300 && /^#{1,6}\s/m.test(content)) ? 0.05 : 0
+
+    // Special handling for AI-enhanced content
+    if (originalSourceQuality && originalSourceQuality.rawContentQualityLevel === 'low') {
+      // If AI created coherent, informative content from poor source, reward it
+      if (density > 0.7 && repetitionRatio > 0.6) {
+        console.log('🤖 AI created high-density content from poor source')
+        density = Math.min(1.0, density + 0.1) // Bonus for successful content creation
       }
     }
 
-    console.log(`Information density: ${(density + structureBonus).toFixed(2)} (clean: ${cleanLength}/${totalLength}, unique: ${repetitionRatio.toFixed(2)})`)
-    return Math.min(1, density + structureBonus)
+    const finalDensity = Math.min(1, density + informationBonus + structureBonus)
+    console.log(`Information density: ${finalDensity.toFixed(2)} (clean: ${cleanLength}/${totalLength}, unique: ${repetitionRatio.toFixed(2)}, bonuses: ${(informationBonus + structureBonus).toFixed(2)})`)
+    return finalDensity
   }
 
   private static assessAuthorityScore(sourceMetadata: SourceMetadata[]): number {
@@ -290,50 +332,90 @@ export class ConfidenceScoring {
     score: number,
     level: 'green' | 'yellow' | 'red',
     originalSourceQuality?: OriginalSourceQuality,
-    sourceQualityPenalty?: number
+    sourceQualityPenalty?: number,
+    changesSummary?: string[],
+    aiAssessment?: any
   ): string {
+    // Prioritize AI-specific reasoning if available
+    if (aiAssessment?.reasoning && typeof aiAssessment.reasoning === 'string' && aiAssessment.reasoning.trim().length > 10) {
+      console.log('🤖 Using AI-specific reasoning for Dan\'s assessment')
+      let reasoning = `${Math.round(score * 100)}% confidence. ${aiAssessment.reasoning}`
+
+      // Add change information if this is an update
+      if (changesSummary && changesSummary.length > 0) {
+        reasoning += ` Changes: ${changesSummary.join(', ')}.`
+      }
+
+      // Add source quality information
+      if (originalSourceQuality) {
+        reasoning += ` Source quality: ${originalSourceQuality.rawContentQualityLevel} (${originalSourceQuality.rawContentLength} chars).`
+
+        if (sourceQualityPenalty && sourceQualityPenalty > 0) {
+          reasoning += ` Applied ${Math.round(sourceQualityPenalty * 100)}% penalty for source quality.`
+        }
+      }
+
+      return reasoning.trim()
+    }
+
+    console.log('📋 Using fallback generic reasoning')
     const strengths: string[] = []
     const weaknesses: string[] = []
 
-    // Analyze each factor
+    // Analyze each factor with specific, actionable feedback
     if (factors.contentClarity >= 0.7) {
-      strengths.push('well-structured content')
+      strengths.push('document has clear headings, proper formatting, and logical flow')
     } else if (factors.contentClarity < 0.4) {
-      weaknesses.push('unclear or unstructured content')
+      weaknesses.push('document lacks structure - missing headings, poor formatting, or confusing organization')
     }
 
     if (factors.sourceConsistency >= 0.7) {
-      strengths.push('consistent across multiple sources')
+      strengths.push('information verified across multiple team discussions or documents')
     } else if (factors.sourceConsistency < 0.4) {
-      weaknesses.push('limited source validation')
+      weaknesses.push('only one source found - may need additional verification from team members')
     }
 
     if (factors.informationDensity >= 0.7) {
-      strengths.push('high information density')
+      strengths.push('packed with useful details, procedures, and actionable information')
     } else if (factors.informationDensity < 0.4) {
-      weaknesses.push('low information content')
+      weaknesses.push('mostly filler content with few actionable details or specific procedures')
     }
 
     if (factors.authorityScore >= 0.7) {
-      strengths.push('authoritative sources')
+      strengths.push('created by experienced team members or subject matter experts')
     } else if (factors.authorityScore < 0.4) {
-      weaknesses.push('questionable source authority')
+      weaknesses.push('source credibility unclear - may need review by domain experts')
     }
 
-    let reasoning = `Confidence: ${Math.round(score * 100)}% (${level}). `
+    // Generate a specific explanation based on the actual issues found
+    let explanation = ""
+    if (level === 'green') {
+      explanation = "Ready to publish - this document meets quality standards for team use."
+    } else if (level === 'yellow') {
+      explanation = "Needs minor cleanup - usable now but could be improved before publishing."
+    } else {
+      explanation = "Requires significant work - major issues that could confuse or mislead users."
+    }
+
+    let reasoning = `${Math.round(score * 100)}% confidence. ${explanation}`
+
+    // Add change information if this is an update
+    if (changesSummary && changesSummary.length > 0) {
+      reasoning += ` Changes: ${changesSummary.join(', ')}.`
+    }
 
     if (strengths.length > 0) {
-      reasoning += `Strengths: ${strengths.join(', ')}. `
+      reasoning += ` Good: ${strengths.join('; ')}.`
     }
 
     if (weaknesses.length > 0) {
-      reasoning += `Areas for review: ${weaknesses.join(', ')}.`
+      reasoning += ` Issues: ${weaknesses.join('; ')}.`
     }
 
     // Add source quality information
     if (originalSourceQuality) {
       reasoning += ` Source quality: ${originalSourceQuality.rawContentQualityLevel} (${originalSourceQuality.rawContentLength} chars).`
-      
+
       if (sourceQualityPenalty && sourceQualityPenalty > 0) {
         reasoning += ` Applied ${Math.round(sourceQualityPenalty * 100)}% penalty for source quality.`
       }
@@ -349,24 +431,24 @@ export class ConfidenceScoring {
     const rawContentLength = rawContent.length
     const lines = rawContent.split('\n').filter(line => line.trim())
     const rawContentLineCount = lines.length
-    
+
     // Calculate unique word ratio
     const words = rawContent.toLowerCase().split(/\s+/).filter(w => w.length > 2)
     const uniqueWords = new Set(words)
     const rawContentUniqueWordRatio = words.length > 0 ? uniqueWords.size / words.length : 0
-    
+
     // Assess structure quality of original content
     const rawContentStructureScore = this.assessRawContentStructure(rawContent)
-    
+
     // Determine overall quality level
     let rawContentQualityLevel: 'high' | 'medium' | 'low' = 'low'
-    
+
     if (rawContentStructureScore >= 0.7 && rawContentLength >= 500 && rawContentUniqueWordRatio >= 0.6) {
       rawContentQualityLevel = 'high'
     } else if (rawContentStructureScore >= 0.4 && rawContentLength >= 200 && rawContentUniqueWordRatio >= 0.4) {
       rawContentQualityLevel = 'medium'
     }
-    
+
     return {
       rawContentLength,
       rawContentLineCount,
@@ -381,61 +463,61 @@ export class ConfidenceScoring {
    */
   private static assessRawContentStructure(rawContent: string): number {
     let score = 0.1 // Base score
-    
+
     // Check for basic structure indicators
     const hasHeadings = /^#{1,6}\s|^[A-Z][^.!?]*:\s*$/m.test(rawContent)
     const hasLists = /^\s*[-*+]\s|^\s*\d+\.\s/m.test(rawContent)
     const hasParagraphs = rawContent.includes('\n\n')
     const hasProperSentences = rawContent.split(/[.!?]+/).filter(s => s.trim().length > 10).length > 2
     const hasMinimalLength = rawContent.length > 100
-    
+
     // Positive indicators
     if (hasHeadings) score += 0.2
     if (hasLists) score += 0.15
     if (hasParagraphs) score += 0.15
     if (hasProperSentences) score += 0.2
     if (hasMinimalLength) score += 0.1
-    
+
     // Negative indicators (fragmented content)
-    const hasFragmentedLines = rawContent.split('\n').filter(line => 
+    const hasFragmentedLines = rawContent.split('\n').filter(line =>
       line.trim().length > 0 && line.trim().length < 20
     ).length > rawContent.split('\n').length * 0.5
-    
-    const hasExcessiveAbbreviations = (rawContent.match(/\b\w{1,3}\b/g) || []).length > 
+
+    const hasExcessiveAbbreviations = (rawContent.match(/\b\w{1,3}\b/g) || []).length >
       (rawContent.split(/\s+/).length * 0.3)
-    
+
     if (hasFragmentedLines) score *= 0.6
     if (hasExcessiveAbbreviations) score *= 0.7
-    
+
     return Math.min(1, score)
   }
 
   /**
-   * Calculate penalty based on original source quality
+   * Calculate penalty based on original source quality (reduced penalties)
    */
   private static calculateSourceQualityPenalty(originalSourceQuality: OriginalSourceQuality): number {
     const { rawContentQualityLevel, rawContentLength, rawContentStructureScore } = originalSourceQuality
-    
+
     let penalty = 0
-    
-    // Base penalty by quality level
+
+    // Reduced base penalty by quality level - focus on final output quality
     switch (rawContentQualityLevel) {
       case 'low':
-        penalty = 0.15 // 15% penalty for poor source
+        penalty = 0.05 // Reduced from 15% to 5% - AI can enhance poor sources
         break
       case 'medium':
-        penalty = 0.05 // 5% penalty for medium source
+        penalty = 0.02 // Reduced from 5% to 2%
         break
       case 'high':
         penalty = 0 // No penalty for high-quality source
         break
     }
-    
-    // Additional penalties for very poor sources
-    if (rawContentLength < 100) penalty += 0.1 // Very short source
-    if (rawContentStructureScore < 0.3) penalty += 0.1 // Very poor structure
-    
-    return Math.min(0.25, penalty) // Cap penalty at 25%
+
+    // Only apply additional penalties for extremely poor sources
+    if (rawContentLength < 50) penalty += 0.05 // Very short source (reduced)
+    if (rawContentStructureScore < 0.1) penalty += 0.05 // Extremely poor structure (reduced)
+
+    return Math.min(0.1, penalty) // Cap penalty at 10% (reduced from 25%)
   }
 
   // Utility method for custom weight configurations
@@ -446,7 +528,7 @@ export class ConfidenceScoring {
     authorityScore: number
   ): ConfidenceWeights {
     const total = contentClarity + sourceConsistency + informationDensity + authorityScore
-    
+
     if (Math.abs(total - 1.0) > 0.01) {
       throw new Error('Confidence weights must sum to 1.0')
     }

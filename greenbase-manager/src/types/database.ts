@@ -22,6 +22,7 @@ export type Database = {
           embedding: string | null
           id: string
           organization_id: string
+          source_draft_id: string | null
           summary: string
           tags: string[] | null
           title: string
@@ -35,6 +36,7 @@ export type Database = {
           embedding?: string | null
           id?: string
           organization_id: string
+          source_draft_id?: string | null
           summary: string
           tags?: string[] | null
           title: string
@@ -48,6 +50,7 @@ export type Database = {
           embedding?: string | null
           id?: string
           organization_id?: string
+          source_draft_id?: string | null
           summary?: string
           tags?: string[] | null
           title?: string
@@ -67,6 +70,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "approved_documents_source_draft_id_fkey"
+            columns: ["source_draft_id"]
+            isOneToOne: false
+            referencedRelation: "draft_documents"
             referencedColumns: ["id"]
           },
         ]

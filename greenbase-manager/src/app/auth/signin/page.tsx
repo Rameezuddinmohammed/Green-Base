@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { useState, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import Link from "next/link"
 
 function SignInForm() {
   const [email, setEmail] = useState("")
@@ -89,14 +90,30 @@ function SignInForm() {
               {loading ? 'Signing In...' : 'Sign In'}
             </Button>
             
+            <div className="text-center">
+              <Link href="/auth/reset-password" className="text-sm text-blue-600 hover:underline">
+                Forgot your password?
+              </Link>
+            </div>
+            
             {(error || authError) && (
-              <div className="text-sm text-red-600 mt-2">
-                {error || authError}
+              <div className="text-sm text-red-600 mt-2 p-3 bg-red-50 rounded-md">
+                <div className="font-medium">Sign In Failed</div>
+                <div className="mt-1">{error || authError}</div>
               </div>
             )}
           </form>
           
-          <div className="mt-6 p-4 bg-blue-50 rounded-md">
+          <div className="mt-6 text-center">
+            <p className="text-sm text-gray-600">
+              Don't have an account?{' '}
+              <Link href="/auth/signup" className="text-blue-600 hover:underline">
+                Sign up here
+              </Link>
+            </p>
+          </div>
+          
+          <div className="mt-4 p-4 bg-blue-50 rounded-md">
             <p className="text-sm text-blue-800 font-medium">Demo Credentials:</p>
             <p className="text-sm text-blue-600">Email: manager@demo.com</p>
             <p className="text-sm text-blue-600">Password: demo123</p>

@@ -1,11 +1,15 @@
-﻿export default function DashboardLayout({
+﻿import { PendingCountProvider } from "@/contexts/pending-count-context"
+
+export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-background">
-      {children}
-    </div>
+    <PendingCountProvider>
+      <div className="min-h-screen bg-background">
+        {children}
+      </div>
+    </PendingCountProvider>
   )
 }

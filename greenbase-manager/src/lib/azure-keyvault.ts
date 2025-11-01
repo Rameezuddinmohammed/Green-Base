@@ -2,38 +2,50 @@ import { SecretClient } from '@azure/keyvault-secrets'
 import { DefaultAzureCredential, ClientSecretCredential } from '@azure/identity'
 
 class AzureKeyVaultService {
-  private client: SecretClient
+  private client: SecretClient | null = null
   
   constructor() {
     const keyVaultUrl = process.env.AZURE_KEY_VAULT_URL
     
     if (!keyVaultUrl) {
-      throw new Error('AZURE_KEY_VAULT_URL environment variable is required')
+      console.warn('AZURE_KEY_VAULT_URL not provided, Key Vault will not be available')
+      // Don't throw error, just log warning
+      return
     }
 
     // Use different credential types based on environment
     let credential
     
-    if (process.env.NODE_ENV === 'production') {
-      // In production, use managed identity or service principal
-      credential = new DefaultAzureCredential()
-    } else {
-      // In development, use client secret credential
-      const clientId = process.env.AZURE_CLIENT_ID
-      const clientSecret = process.env.AZURE_CLIENT_SECRET
-      const tenantId = process.env.AZURE_TENANT_ID
-      
-      if (!clientId || !clientSecret || !tenantId) {
-        throw new Error('Azure credentials are required for development environment')
+    try {
+      if (process.env.NODE_ENV === 'production') {
+        // In production, use managed identity or service principal
+        credential = new DefaultAzureCredential()
+      } else {
+        // In development, use client secret credential
+        const clientId = process.env.AZURE_CLIENT_ID
+        const clientSecret = process.env.AZURE_CLIENT_SECRET
+        const tenantId = process.env.AZURE_TENANT_ID
+        
+        if (!clientId || !clientSecret || !tenantId) {
+          console.warn('Azure credentials not provided, Key Vault will not be available in development')
+          return
+        }
+        
+        credential = new ClientSecretCredential(tenantId, clientId, clientSecret)
       }
       
-      credential = new ClientSecretCredential(tenantId, clientId, clientSecret)
+      this.client = new SecretClient(keyVaultUrl, credential)
+    } catch (error) {
+      console.warn('Failed to initialize Azure Key Vault client:', error)
     }
-    
-    this.client = new SecretClient(keyVaultUrl, credential)
   }
 
   async getSecret(secretName: string): Promise<string | undefined> {
+    if (!this.client) {
+      console.warn(`Key Vault client not available, cannot retrieve secret: ${secretName}`)
+      return undefined
+    }
+    
     try {
       const secret = await this.client.getSecret(secretName)
       return secret.value
@@ -44,6 +56,10 @@ class AzureKeyVaultService {
   }
 
   async setSecret(secretName: string, secretValue: string): Promise<void> {
+    if (!this.client) {
+      throw new Error('Key Vault client not available')
+    }
+    
     try {
       await this.client.setSecret(secretName, secretValue)
     } catch (error) {
@@ -53,6 +69,10 @@ class AzureKeyVaultService {
   }
 
   async deleteSecret(secretName: string): Promise<void> {
+    if (!this.client) {
+      throw new Error('Key Vault client not available')
+    }
+    
     try {
       await this.client.beginDeleteSecret(secretName)
     } catch (error) {
@@ -70,6 +90,11 @@ class AzureKeyVaultService {
 
   // Helper methods for OAuth tokens
   async storeOAuthTokens(userId: string, provider: string, accessToken: string, refreshToken: string): Promise<void> {
+    if (!this.client) {
+      console.warn('Key Vault client not available, cannot store OAuth tokens')
+      return
+    }
+    
     const sanitizedUserId = this.sanitizeSecretName(userId)
     const accessTokenKey = `oauth-${provider}-access-${sanitizedUserId}`
     const refreshTokenKey = `oauth-${provider}-refresh-${sanitizedUserId}`
@@ -81,6 +106,11 @@ class AzureKeyVaultService {
   }
 
   async getOAuthTokens(userId: string, provider: string): Promise<{ accessToken?: string; refreshToken?: string }> {
+    if (!this.client) {
+      console.warn('Key Vault client not available, cannot retrieve OAuth tokens')
+      return {}
+    }
+    
     const sanitizedUserId = this.sanitizeSecretName(userId)
     const accessTokenKey = `oauth-${provider}-access-${sanitizedUserId}`
     const refreshTokenKey = `oauth-${provider}-refresh-${sanitizedUserId}`
@@ -94,6 +124,11 @@ class AzureKeyVaultService {
   }
 
   async deleteOAuthTokens(userId: string, provider: string): Promise<void> {
+    if (!this.client) {
+      console.warn('Key Vault client not available, cannot delete OAuth tokens')
+      return
+    }
+    
     const sanitizedUserId = this.sanitizeSecretName(userId)
     const accessTokenKey = `oauth-${provider}-access-${sanitizedUserId}`
     const refreshTokenKey = `oauth-${provider}-refresh-${sanitizedUserId}`

@@ -1,7 +1,7 @@
 import { getAzureOpenAIService } from './azure-openai'
 import { getPIIRedactionService } from './pii-redaction'
 import { ConfidenceScoring } from './confidence-scoring'
-import { PromptTemplates } from './prompt-templates'
+import { PromptTemplates, DocumentDomain } from './prompt-templates'
 
 export interface SourceReference {
   sourceType: 'teams' | 'google_drive'
@@ -40,16 +40,70 @@ class AIIntegrationService {
   private promptTemplates = PromptTemplates
 
   /**
+   * Classify document type before processing
+   */
+  async classifyDocumentType(rawContent: string): Promise<DocumentDomain> {
+    try {
+      console.log('Starting document classification...')
+      
+      const classificationPrompt = this.promptTemplates.documentClassification({
+        rawContent
+      })
+      
+      const result = await this.openAIService.chatCompletion([
+        { role: 'system', content: classificationPrompt.system },
+        { role: 'user', content: classificationPrompt.user }
+      ], { temperature: 0.1, maxTokens: 50 })
+
+      // Parse the classification result
+      const rawClassification = result.content.trim()
+      const classification = rawClassification.toUpperCase()
+      
+      console.log(`Raw AI classification response: "${rawClassification}"`)
+      console.log(`Normalized classification: "${classification}"`)
+      
+      // Validate that it's a valid DocumentDomain
+      const validDomains = Object.values(DocumentDomain)
+      if (validDomains.includes(classification as DocumentDomain)) {
+        console.log(`✅ Document classified as: ${classification}`)
+        return classification as DocumentDomain
+      } else {
+        console.warn(`❌ Invalid classification result: "${classification}"`)
+        console.warn(`Valid domains are: ${validDomains.join(', ')}`)
+        console.warn(`Defaulting to DEFAULT_SOP`)
+        return DocumentDomain.DEFAULT_SOP
+      }
+      
+    } catch (error) {
+      console.error('❌ Document classification error:', error)
+      console.error('Content preview:', rawContent.substring(0, 200) + '...')
+      console.error('Defaulting to DEFAULT_SOP due to classification error')
+      return DocumentDomain.DEFAULT_SOP
+    }
+  }
+
+  /**
    * Process raw content through the complete AI pipeline
    */
   async processContent(
     rawContent: string,
-    sourceReferences: SourceReference[]
+    sourceReferences: SourceReference[],
+    changesSummary?: string[]
   ): Promise<AIProcessingResult> {
     const startTime = Date.now()
     let totalTokens = 0
 
     try {
+      // Validate input content
+      if (!rawContent || rawContent.trim().length === 0) {
+        throw new Error('Unable to process file: No readable content found. The file may be corrupted, in an unsupported format, or empty.')
+      }
+
+      // Check for minimal content quality
+      if (rawContent.trim().length < 10) {
+        throw new Error('Unable to process file: Content is too short or may not have been extracted properly.')
+      }
+
       console.log('Starting PII redaction...')
       console.log(`Input content length: ${rawContent.length} characters`)
 
@@ -59,17 +113,38 @@ class AIIntegrationService {
 
       console.log(`PII redaction completed. Found ${piiResult.entities.length} entities`)
 
+      // Step 2: Document Classification
+      console.log('Starting document classification...')
+      const documentDomain = await this.classifyDocumentType(rawContent)
+      
       console.log('Starting content structuring...')
-      // Step 2: Content Structuring
-      const structuringPrompt = this.promptTemplates.contentStructuring({
-        sourceContent: [redactedContent],
-        sourceType: sourceReferences[0]?.sourceType || 'teams',
-        metadata: {
-          sourceCount: sourceReferences.length,
-          totalLength: rawContent.length,
-          piiEntitiesFound: piiResult.entities.length
-        }
-      })
+      // Step 3: Domain-Aware Content Structuring
+      let structuringPrompt;
+      
+      if (documentDomain === DocumentDomain.AI_DETERMINED) {
+        console.log('🤖 Using AI-determined formatting for unique document type')
+        // Use AI to determine the best formatting approach
+        structuringPrompt = this.promptTemplates.aiDeterminedFormatting({
+          rawContent: redactedContent,
+          metadata: {
+            sourceCount: sourceReferences.length,
+            totalLength: rawContent.length,
+            piiEntitiesFound: piiResult.entities.length
+          }
+        })
+      } else {
+        console.log(`📋 Using predefined ${documentDomain} template`)
+        // Use predefined specialist prompt for known domains
+        structuringPrompt = this.promptTemplates.getSpecialistPrompt(documentDomain, {
+          sourceContent: [redactedContent],
+          sourceType: sourceReferences[0]?.sourceType || 'teams',
+          metadata: {
+            sourceCount: sourceReferences.length,
+            totalLength: rawContent.length,
+            piiEntitiesFound: piiResult.entities.length
+          }
+        })
+      }
       const structuringResult = await this.openAIService.chatCompletion([
         { role: 'system', content: structuringPrompt.system },
         { role: 'user', content: structuringPrompt.user }
@@ -78,10 +153,10 @@ class AIIntegrationService {
       totalTokens += structuringResult.usage.totalTokens
       const structuredContent = structuringResult.content
 
-      // Step 3: Summary Generation (simple extraction from structured content)
+      // Step 4: Summary Generation (simple extraction from structured content)
       const summary = this.extractSummary(structuredContent)
 
-      // Step 4: Topic Identification
+      // Step 5: Topic Identification
       let topics: string[] = []
       if (structuredContent.length > 100) {
         console.log('Starting topic identification...')
@@ -112,7 +187,7 @@ class AIIntegrationService {
       }
 
       console.log('Starting confidence assessment...')
-      // Step 5: Confidence Assessment
+      // Step 6: Confidence Assessment
       const sourceMetadata = sourceReferences.map(ref => ({
         type: ref.sourceType,
         authorCount: ref.metadata.author ? 1 : 0,
@@ -122,23 +197,44 @@ class AIIntegrationService {
         participants: ref.metadata.author ? [ref.metadata.author] : []
       }))
 
-      // Get AI assessment for confidence factors
-      const confidencePrompt = this.promptTemplates.confidenceAssessment({
-        structuredContent,
-        sourceQuality: 0.5, // More conservative default quality score
-        contentLength: structuredContent.length,
-        sourceCount: sourceReferences.length
-      })
-      const confidenceResult = await this.openAIService.chatCompletion([
-        { role: 'system', content: confidencePrompt.system },
-        { role: 'user', content: confidencePrompt.user }
-      ], { temperature: 0.1, maxTokens: 300 })
+      let aiAssessment = undefined
 
-      totalTokens += confidenceResult.usage.totalTokens
+      // Analyze original source quality first
+      const originalSourceQuality = ConfidenceScoring.analyzeOriginalSourceQuality(rawContent)
+      console.log('Original source quality analysis:', originalSourceQuality)
 
-      // Parse AI confidence assessment with improved error handling
-      let aiAssessment
+      // Calculate dynamic source quality score
+      const sourceQualityScore = originalSourceQuality.rawContentQualityLevel === 'high' ? 0.8 :
+                                originalSourceQuality.rawContentQualityLevel === 'medium' ? 0.6 : 0.4
+
       try {
+        // First, get heuristic analysis for AI to reference
+        const heuristicAnalysis = this.generateHeuristicAnalysis(structuredContent, sourceMetadata, originalSourceQuality)
+        
+        // Use dynamic AI-driven confidence scoring as primary method
+        const confidencePrompt = this.promptTemplates.dynamicConfidenceScoring({
+          structuredContent,
+          sourceQuality: sourceQualityScore,
+          contentLength: structuredContent.length,
+          sourceCount: sourceReferences.length,
+          heuristicData: heuristicAnalysis,
+          documentType: this.inferDocumentType(structuredContent),
+          sourceMetadata: sourceMetadata
+        })
+        const confidenceResult = await Promise.race([
+          this.openAIService.chatCompletion([
+            { role: 'system', content: confidencePrompt.system },
+            { role: 'user', content: confidencePrompt.user }
+          ], { temperature: 0.1, maxTokens: 300 }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('AI confidence assessment timeout')), 30000)
+          )
+        ]) as any
+
+        totalTokens += confidenceResult.usage.totalTokens
+
+        // Parse AI confidence assessment with improved error handling
+        try {
         // Try to extract JSON from the response (handle cases where AI adds extra text)
         let jsonContent = confidenceResult.content.trim()
         
@@ -162,19 +258,42 @@ class AIIntegrationService {
           throw new Error('Missing or invalid factors object')
         }
 
-        aiAssessment = {
-          factors: {
-            contentClarity: typeof parsed.factors.contentClarity === 'number' 
-              ? parsed.factors.contentClarity 
+        // Validate and clamp scores to 0-1 range
+        const validateScore = (score: any): number | undefined => {
+          if (typeof score === 'number' && !isNaN(score)) {
+            return Math.min(1, Math.max(0, score))
+          }
+          return undefined
+        }
+
+        // Handle both old and new response formats
+        if (parsed.overallConfidence && typeof parsed.overallConfidence === 'number') {
+          // New dynamic format - AI provides overall score
+          aiAssessment = {
+            overallScore: validateScore(parsed.overallConfidence),
+            factors: {
+              contentClarity: validateScore(parsed.factors?.contentClarity),
+              sourceConsistency: validateScore(parsed.factors?.factualConsistency || parsed.factors?.informationCompleteness),
+              informationDensity: validateScore(parsed.factors?.informationCompleteness || parsed.factors?.actionability),
+              authorityScore: validateScore(parsed.factors?.professionalStandards || parsed.factors?.factualConsistency)
+            },
+            reasoning: typeof parsed.reasoning === 'string' && parsed.reasoning.trim().length > 0 
+              ? parsed.reasoning.trim() 
               : undefined,
-            sourceConsistency: typeof parsed.factors.informationCompleteness === 'number'
-              ? parsed.factors.informationCompleteness 
-              : undefined,
-            informationDensity: typeof parsed.factors.factualConsistency === 'number'
-              ? parsed.factors.factualConsistency 
-              : undefined,
-            authorityScore: typeof parsed.overallConfidence === 'number'
-              ? parsed.overallConfidence 
+            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : undefined,
+            confidenceLevel: typeof parsed.confidenceLevel === 'string' ? parsed.confidenceLevel : undefined
+          }
+        } else {
+          // Legacy format - calculate from factors
+          aiAssessment = {
+            factors: {
+              contentClarity: validateScore(parsed.factors.contentClarity),
+              sourceConsistency: validateScore(parsed.factors.factualConsistency),
+              informationDensity: validateScore(parsed.factors.informationCompleteness),
+              authorityScore: validateScore(parsed.overallConfidence)
+            },
+            reasoning: typeof parsed.reasoning === 'string' && parsed.reasoning.trim().length > 0 
+              ? parsed.reasoning.trim() 
               : undefined
           }
         }
@@ -195,27 +314,33 @@ class AIIntegrationService {
 
         console.log('Regex extraction:', { clarityMatch, completenessMatch, consistencyMatch, overallMatch })
 
+        // Fix field mapping in fallback - match the expected field names
         aiAssessment = {
           factors: {
             contentClarity: clarityMatch ? Math.min(1, Math.max(0, parseFloat(clarityMatch[1]))) : undefined,
-            sourceConsistency: completenessMatch ? Math.min(1, Math.max(0, parseFloat(completenessMatch[1]))) : undefined,
-            informationDensity: consistencyMatch ? Math.min(1, Math.max(0, parseFloat(consistencyMatch[1]))) : undefined,
+            sourceConsistency: consistencyMatch ? Math.min(1, Math.max(0, parseFloat(consistencyMatch[1]))) : undefined,
+            informationDensity: completenessMatch ? Math.min(1, Math.max(0, parseFloat(completenessMatch[1]))) : undefined,
             authorityScore: overallMatch ? Math.min(1, Math.max(0, parseFloat(overallMatch[1]))) : undefined
-          }
+          },
+          reasoning: undefined // No reasoning available from regex fallback
         }
         
         console.log('Fallback AI Assessment:', aiAssessment)
       }
+    } catch (aiError) {
+      console.error('AI confidence assessment failed completely:', aiError)
+      aiAssessment = undefined
+    }
 
-      // Analyze original source quality
-      const originalSourceQuality = ConfidenceScoring.analyzeOriginalSourceQuality(rawContent)
-      console.log('Original source quality analysis:', originalSourceQuality)
+      // originalSourceQuality already analyzed above
 
       const confidence = ConfidenceScoring.calculateConfidence(
         structuredContent,
         sourceMetadata,
         aiAssessment,
-        originalSourceQuality
+        originalSourceQuality,
+        undefined, // Use default weights
+        changesSummary
       )
 
       const processingTime = Date.now() - startTime
@@ -310,6 +435,85 @@ class AIIntegrationService {
       return 'Policy and guidelines documentation.'
     } else {
       return 'Internal documentation and reference material.'
+    }
+  }
+
+  /**
+   * Generate heuristic analysis for AI reference
+   */
+  private generateHeuristicAnalysis(content: string, sourceMetadata: any[], originalSourceQuality: any) {
+    const words = content.split(/\s+/).filter(w => w.length > 0)
+    const lines = content.split('\n').filter(l => l.trim())
+    
+    // Clarity indicators
+    const hasHeadings = /^#{1,6}\s/m.test(content)
+    const hasLists = /^\s*[-*+]\s|^\s*\d+\.\s/m.test(content)
+    const hasProperSentences = content.split(/[.!?]+/).filter(s => s.trim().length > 10).length > 3
+    const hasSections = (content.match(/^#{1,6}\s/gm) || []).length >= 2
+    
+    const clarityIndicators = [
+      hasHeadings && 'headings',
+      hasLists && 'lists', 
+      hasProperSentences && 'proper sentences',
+      hasSections && 'multiple sections'
+    ].filter(Boolean).join(', ') || 'minimal structure'
+
+    // Information density
+    const uniqueWords = new Set(words.map(w => w.toLowerCase()))
+    const repetitionRatio = uniqueWords.size / (words.length || 1)
+    const informationDensity = `${(repetitionRatio * 100).toFixed(0)}% unique words, ${words.length} total words`
+
+    // Source consistency
+    const sourceConsistency = sourceMetadata.length > 1 
+      ? `${sourceMetadata.length} sources, multiple authors`
+      : `single source, ${sourceMetadata[0]?.authorCount || 0} authors`
+
+    // Authority indicators
+    const isRecent = sourceMetadata.some(s => {
+      const age = (Date.now() - new Date(s.lastModified).getTime()) / (1000 * 60 * 60 * 24)
+      return age < 90
+    })
+    const authorityIndicators = [
+      isRecent && 'recent content',
+      sourceMetadata.length > 1 && 'multiple sources',
+      originalSourceQuality?.rawContentQualityLevel === 'high' && 'high source quality'
+    ].filter(Boolean).join(', ') || 'limited authority indicators'
+
+    // Detected issues
+    const detectedIssues = []
+    if (content.length < 200) detectedIssues.push('very short content')
+    if (!hasHeadings) detectedIssues.push('no headings')
+    if (!hasLists && !hasProperSentences) detectedIssues.push('poor structure')
+    if (repetitionRatio < 0.3) detectedIssues.push('highly repetitive')
+    if (originalSourceQuality?.rawContentQualityLevel === 'low') detectedIssues.push('poor source quality')
+
+    return {
+      clarityIndicators,
+      informationDensity,
+      sourceConsistency,
+      authorityIndicators,
+      detectedIssues
+    }
+  }
+
+  /**
+   * Infer document type from content
+   */
+  private inferDocumentType(content: string): string {
+    const lowerContent = content.toLowerCase()
+    
+    if (lowerContent.includes('procedure') || lowerContent.includes('steps') || lowerContent.includes('process')) {
+      return 'Standard Operating Procedure'
+    } else if (lowerContent.includes('policy') || lowerContent.includes('guidelines') || lowerContent.includes('rules')) {
+      return 'Policy Document'
+    } else if (lowerContent.includes('handbook') || lowerContent.includes('manual')) {
+      return 'Reference Manual'
+    } else if (lowerContent.includes('contact') || lowerContent.includes('directory')) {
+      return 'Contact Directory'
+    } else if (lowerContent.includes('plan') || lowerContent.includes('strategy')) {
+      return 'Strategic Document'
+    } else {
+      return 'Business Document'
     }
   }
 

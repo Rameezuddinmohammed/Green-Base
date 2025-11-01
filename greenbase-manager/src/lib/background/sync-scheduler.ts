@@ -9,18 +9,20 @@ export class SyncScheduler {
   private intervalId: NodeJS.Timeout | null = null
   private isRunning = false
   private changeDetectionService = getChangeDetectionService()
+  private checkIntervalMinutes = 5 // How often to check (not sync frequency)
 
   /**
    * Start the automatic sync scheduler
-   * @param intervalMinutes How often to check for sources needing sync (default: 5 minutes)
+   * @param checkIntervalMinutes How often to check for sources needing sync (default: 5 minutes)
    */
-  start(intervalMinutes: number = 5): void {
+  start(checkIntervalMinutes: number = 5): void {
     if (this.isRunning) {
       console.log('⚠️ Sync scheduler is already running')
       return
     }
 
-    console.log(`🚀 Starting automatic sync scheduler (checking every ${intervalMinutes} minutes)`)
+    this.checkIntervalMinutes = checkIntervalMinutes
+    console.log(`🚀 Starting automatic sync scheduler (checking every ${checkIntervalMinutes} minutes)`)
     
     this.isRunning = true
     
@@ -30,7 +32,7 @@ export class SyncScheduler {
     // Then run on interval
     this.intervalId = setInterval(() => {
       this.runSyncCheck()
-    }, intervalMinutes * 60 * 1000)
+    }, checkIntervalMinutes * 60 * 1000)
   }
 
   /**
@@ -98,6 +100,24 @@ export class SyncScheduler {
   async triggerManualCheck(): Promise<void> {
     console.log('🔧 Manually triggering sync check...')
     await this.runSyncCheck()
+  }
+
+  /**
+   * Notify scheduler that a manual sync occurred for a source
+   * This resets the timer for that source's next automatic sync
+   */
+  notifyManualSync(sourceId: string): void {
+    console.log(`🔄 Manual sync completed for source ${sourceId}, timer reset for next automatic sync`)
+    // The next automatic sync check will see the updated last_sync_at time
+    // and respect the source's sync_frequency_minutes setting
+  }
+
+  /**
+   * Get the next scheduled check time
+   */
+  getNextCheckTime(): Date | null {
+    if (!this.isRunning) return null
+    return new Date(Date.now() + this.checkIntervalMinutes * 60 * 1000)
   }
 }
 

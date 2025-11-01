@@ -32,14 +32,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state changed:', event, !!session)
+        console.log('🔄 Auth state changed:', {
+          event,
+          hasSession: !!session,
+          userId: session?.user?.id || null,
+          email: session?.user?.email || null
+        })
+        
         setSession(session)
         setUser(session?.user ?? null)
         setLoading(false)
 
         // Handle sign out
         if (event === 'SIGNED_OUT') {
-          window.location.href = '/auth/signin'
+          console.log('🚪 Auth state: SIGNED_OUT event received, redirecting to signin...')
+          // Clear local state immediately
+          setSession(null)
+          setUser(null)
+          // Small delay to ensure state is updated before redirect
+          setTimeout(() => {
+            console.log('🔄 Redirecting to signin page...')
+            window.location.href = '/auth/signin'
+          }, 100)
+        }
+        
+        // Handle sign in
+        if (event === 'SIGNED_IN' && session) {
+          console.log('🔑 Auth state: SIGNED_IN event received for:', session.user.email)
+        }
+        
+        // Handle token refresh
+        if (event === 'TOKEN_REFRESHED' && session) {
+          console.log('🔄 Auth state: TOKEN_REFRESHED for:', session.user.email)
         }
       }
     )
@@ -48,7 +72,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    try {
+      console.log('🔄 Initiating sign out...')
+      
+      // Call server-side signout for proper session cleanup
+      const response = await fetch('/api/auth/signout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) {
+        console.warn('Server signout failed, falling back to client signout')
+      }
+      
+      // Also call client-side signout to ensure local state is cleared
+      await supabase.auth.signOut()
+      
+      console.log('✅ Sign out completed')
+      
+      // Force redirect to signin page
+      window.location.href = '/auth/signin'
+      
+    } catch (error) {
+      console.error('❌ Sign out error:', error)
+      // Fallback: just do client-side signout
+      await supabase.auth.signOut()
+      window.location.href = '/auth/signin'
+    }
   }
 
   return (

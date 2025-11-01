@@ -1,36 +1,15 @@
 "use client"
 
-import { useState, useEffect } from "react"
 import { Navigation } from "./navigation"
+import { ToastContainer } from "../ui/toast"
+import { usePendingCount } from "@/contexts/pending-count-context"
 
 interface DashboardLayoutProps {
   children: React.ReactNode
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
-  const [pendingCount, setPendingCount] = useState(0)
-
-  // Fetch pending approvals count
-  useEffect(() => {
-    const fetchPendingCount = async () => {
-      try {
-        const response = await fetch('/api/drafts')
-        if (response.ok) {
-          const data = await response.json()
-          const pending = data.drafts?.filter((draft: any) => draft.status === 'pending') || []
-          setPendingCount(pending.length)
-        }
-      } catch (error) {
-        console.error('Failed to fetch pending count:', error)
-      }
-    }
-
-    fetchPendingCount()
-    
-    // Refresh count every 30 seconds
-    const interval = setInterval(fetchPendingCount, 30000)
-    return () => clearInterval(interval)
-  }, [])
+  const { pendingCount } = usePendingCount()
 
   return (
     <div className="min-h-screen bg-background">

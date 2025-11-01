@@ -30,13 +30,13 @@ export async function middleware(req: NextRequest) {
   // Get authenticated user - more secure than getSession()
   const { data: { user }, error } = await supabase.auth.getUser()
   
-  // Debug logging
-  console.log('Middleware - Path:', req.nextUrl.pathname)
-  console.log('Middleware - User exists:', !!user)
-  console.log('Middleware - Auth error:', error?.message || 'none')
-  if (user) {
-    console.log('Middleware - User ID:', user.id)
-  }
+  // Debug logging (disabled for cleaner terminal)
+  // console.log('Middleware - Path:', req.nextUrl.pathname)
+  // console.log('Middleware - User exists:', !!user)
+  // console.log('Middleware - Auth error:', error?.message || 'none')
+  // if (user) {
+  //   console.log('Middleware - User ID:', user.id)
+  // }
 
 
 
@@ -45,25 +45,30 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // TEMPORARILY DISABLED PROTECTION FOR DEBUGGING
-  // TODO: Re-enable after fixing session detection
-  
   // Define protected routes
-  const protectedRoutes = ['/dashboard/approvals', '/dashboard/sources', '/dashboard/knowledge-base']
+  const protectedRoutes = ['/dashboard']
   const authRoutes = ['/auth/signin', '/auth/signup']
 
+  const isProtectedRoute = protectedRoutes.some(route => 
+    req.nextUrl.pathname.startsWith(route)
+  )
   const isAuthRoute = authRoutes.some(route => 
     req.nextUrl.pathname.startsWith(route)
   )
 
-  // Only redirect authenticated users away from auth pages
+  // Redirect authenticated users away from auth pages
   if (user && isAuthRoute) {
+    // console.log('Authenticated user accessing auth page, redirecting to dashboard')
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
-  // TEMPORARILY DISABLED: Route protection
-  // This allows access to all dashboard routes without authentication
-  // so we can test the OAuth flow and other functionality
+  // Protect dashboard routes - require authentication
+  if (isProtectedRoute && !user) {
+    // console.log('Unauthenticated user accessing protected route, redirecting to signin')
+    const redirectUrl = new URL('/auth/signin', req.url)
+    redirectUrl.searchParams.set('redirectTo', req.nextUrl.pathname)
+    return NextResponse.redirect(redirectUrl)
+  }
 
   return response
 }

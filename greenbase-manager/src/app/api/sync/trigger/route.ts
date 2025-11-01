@@ -8,6 +8,35 @@ import { cookies } from 'next/headers'
  */
 export async function POST(request: NextRequest) {
   try {
+    const body = await request.json().catch(() => ({}))
+    const { action } = body
+
+    // Allow starting scheduler without authentication for app initialization
+    if (action === 'start') {
+      console.log('🚀 Starting automatic sync scheduler...')
+      
+      const scheduler = getSyncScheduler()
+      
+      if (scheduler.isSchedulerRunning()) {
+        return NextResponse.json({
+          success: true,
+          message: 'Scheduler is already running',
+          status: 'already_running'
+        })
+      }
+      
+      // Start with 5-minute check intervals (will respect individual source frequencies)
+      scheduler.start(5)
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Automatic sync scheduler started successfully',
+        status: 'started',
+        checkInterval: '5 minutes'
+      })
+    }
+
+    // For other actions, require authentication
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,6 +75,17 @@ export async function POST(request: NextRequest) {
     console.log(`🔧 Manual sync trigger requested by ${session.user.email}`)
 
     const scheduler = getSyncScheduler()
+    
+    if (action === 'stop') {
+      scheduler.stop()
+      return NextResponse.json({
+        success: true,
+        message: 'Scheduler stopped successfully',
+        stoppedBy: session.user.email
+      })
+    }
+    
+    // Default action: trigger manual check
     await scheduler.triggerManualCheck()
 
     return NextResponse.json({
@@ -56,7 +96,7 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error: any) {
-    console.error('Failed to trigger manual sync:', error)
+    console.error('Failed to trigger sync action:', error)
     
     return NextResponse.json({
       success: false,

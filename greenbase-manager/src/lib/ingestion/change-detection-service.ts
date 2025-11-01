@@ -167,6 +167,9 @@ class ChangeDetectionService {
         await this.updateSourceChangeToken(source.source_id, result.newChangeToken)
       }
 
+      // Update last sync time for the source
+      await this.updateSourceLastSync(source.source_id)
+
       // Record successful completion
       await this.updateSyncOperation(syncId, 'completed', {
         itemsProcessed: result.totalItemsChecked,
@@ -196,6 +199,125 @@ class ChangeDetectionService {
 
       throw error
     }
+  }
+
+  /**
+   * Perform initial sync for Google Drive (scan all files in selected folders)
+   */
+  private async performInitialGoogleDriveSync(source: any, selectedFolders: string[], startTime: number): Promise<ChangeDetectionResult> {
+    const changedItems: SourceContent[] = []
+    let totalItemsChecked = 0
+
+    try {
+      // Scan each selected folder
+      for (const folderId of selectedFolders) {
+        console.log(`📂 Scanning folder ${folderId}...`)
+        
+        // Get all files in this folder (recursively)
+        const folderItems = await this.googleDriveService.getDriveItems(source.user_id, folderId, 1000)
+        
+        for (const item of folderItems) {
+          totalItemsChecked++
+          
+          // Skip folders
+          if (item.folder) {
+            console.log(`📂 Skipping folder: ${item.name}`)
+            continue
+          }
+
+          // Skip non-document files
+          const mimeType = item.file?.mimeType || ''
+          if (!this.isProcessableFileType(mimeType)) {
+            console.log(`⏭️ Skipping non-document file: ${item.name} (${mimeType})`)
+            continue
+          }
+
+          console.log(`📄 Processing file: ${item.name}`)
+
+          try {
+            // Get file content
+            const content = await this.googleDriveService.getFileContent(source.user_id, item.id)
+            
+            // Create source content object
+            const sourceContent: SourceContent = {
+              id: item.id,
+              type: 'drive_file',
+              title: item.name,
+              content: content,
+              metadata: {
+                createdAt: new Date(item.createdDateTime),
+                sourceUrl: item.webUrl,
+                mimeType: mimeType,
+                lastModified: new Date(item.lastModifiedDateTime)
+              }
+            }
+
+            changedItems.push(sourceContent)
+
+            // Record source item
+            await this.supabase
+              .from('source_items')
+              .upsert({
+                source_id: source.source_id,
+                external_id: item.id,
+                item_type: 'file',
+                name: item.name,
+                last_modified: new Date(item.lastModifiedDateTime),
+                etag: item.id,
+                parent_id: folderId,
+                is_processed: false,
+                metadata: {
+                  mimeType: mimeType,
+                  webUrl: item.webUrl
+                },
+                organization_id: (await this.supabase
+                  .from('users')
+                  .select('organization_id')
+                  .eq('id', source.user_id)
+                  .single()).data.organization_id
+              }, {
+                onConflict: 'source_id,external_id'
+              })
+
+          } catch (contentError) {
+            console.warn(`⚠️ Failed to get content for file ${item.name}:`, contentError)
+            // Continue with other files
+          }
+        }
+      }
+
+      // Get a new change token for future syncs
+      const newChangeToken = await this.googleDriveService.getStartPageToken(source.user_id)
+
+      return {
+        sourceId: source.source_id,
+        changedItems,
+        newChangeToken,
+        totalItemsChecked,
+        processingTime: Date.now() - startTime
+      }
+
+    } catch (error) {
+      throw new Error(`Initial Google Drive sync failed: ${error}`)
+    }
+  }
+
+  /**
+   * Check if a file type is processable (documents, text files, etc.)
+   */
+  private isProcessableFileType(mimeType: string): boolean {
+    const processableTypes = [
+      'application/vnd.google-apps.document',
+      'application/vnd.google-apps.spreadsheet', 
+      'application/vnd.google-apps.presentation',
+      'text/plain',
+      'text/markdown',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ]
+    
+    return processableTypes.includes(mimeType) || mimeType.startsWith('text/')
   }
 
   /**
@@ -242,6 +364,14 @@ class ChangeDetectionService {
 
       console.log(`🔍 Checking Google Drive changes for source: ${source.name}`)
       
+      // Check if this is the first sync (no change token)
+      const isFirstSync = !source.change_token
+      
+      if (isFirstSync) {
+        console.log(`🆕 First sync detected - scanning all files in selected folders`)
+        return await this.performInitialGoogleDriveSync(source, selectedFolders, startTime)
+      }
+
       // Use Changes API for efficient change detection
       let changesResult
       try {
@@ -541,6 +671,32 @@ class ChangeDetectionService {
       console.error('Failed to update source change token:', error)
       throw new Error(`Failed to update change token: ${error.message}`)
     }
+  }
+
+  /**
+   * Update source last sync time after successful sync
+   */
+  private async updateSourceLastSync(sourceId: string): Promise<void> {
+    await this.initialize()
+    
+    console.log(`🕒 Updating last sync time for source ${sourceId}...`)
+    
+    const { data, error } = await this.supabase
+      .from('connected_sources')
+      .update({ 
+        last_sync_at: new Date().toISOString(),
+        last_change_check: new Date().toISOString()
+      })
+      .eq('id', sourceId)
+      .select('id, name, last_sync_at')
+    
+    if (error) {
+      console.error('❌ Failed to update source last sync time:', error)
+      // Don't throw here - we don't want to fail the entire sync for this
+      return
+    }
+    
+    console.log(`✅ Updated last sync time for source ${sourceId}:`, data)
   }
 
   /**

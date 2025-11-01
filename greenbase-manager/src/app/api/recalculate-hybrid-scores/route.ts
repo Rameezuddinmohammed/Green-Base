@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
           originalSourceQuality // NEW: Include original source quality
         )
 
-        const oldScore = parseFloat(draft.confidence_score)
+        const oldScore = parseFloat(draft.confidence_score.toString())
         const newScore = newConfidence.score
         const newTriageLevel = newConfidence.level
 
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
       summary: {
         totalProcessed: results.length,
         avgChange: results.reduce((sum, r) => sum + (r.change || 0), 0) / results.length,
-        penaltiesApplied: results.filter(r => r.penalty > 0).length
+        penaltiesApplied: results.filter(r => (r.penalty || 0) > 0).length
       }
     })
 
